@@ -1,6 +1,6 @@
 {
   "name": "anti-rea",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "面向用户自有软件的离线审计与加固工具，附带共用同一套工作流的 MCP（Model Context Protocol，模型上下文协议）服务与命令行。",
   "type": "module",
   "engines": {

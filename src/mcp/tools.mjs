@@ -4,7 +4,7 @@
 /** 服务标识。 */
 export const SERVER_INFO = Object.freeze({
   name: 'anti-rea',
-  version: '0.1.0',
+  version: '0.1.1',
   title: 'Anti-REA',
 });
 
