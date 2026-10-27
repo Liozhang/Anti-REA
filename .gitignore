@@ -10,3 +10,35 @@ node_modules/
 # 仓库根的临时审计与报告输出
 /audit*.json
 /*-report.json
+
+# 编辑器与操作系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# 日志与调试输出
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 测试与覆盖率产物
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# 本地环境与密钥材料：开发机上的真实凭据不得进版本库
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 打包产物
+*.tgz
