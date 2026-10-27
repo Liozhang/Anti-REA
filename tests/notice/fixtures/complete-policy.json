@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "legal": {
+    "subject": "示例主体",
+    "contact": "security@example.com",
+    "jurisdiction": "示例辖区",
+    "licenseId": "MIT",
+    "licenseTextSource": "https://example.com/LICENSE",
+    "prohibitedActs": ["逆向工程", "反编译后再分发"],
+    "consequences": [
+      {
+        "statement": "未经许可逆向工程本制品的行为，示例主体将依法主张权利。",
+        "statuteExcerpt": "示例法条摘录：用户提供的真实法条文本。"
+      }
+    ]
+  }
+}

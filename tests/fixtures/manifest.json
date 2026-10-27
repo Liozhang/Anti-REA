@@ -1,0 +1,29 @@
+{
+  "schema": "anti-rea.fixture-manifest/1",
+  "note": "已提交夹具的 sha256 记录。字节级夹具由 tests/fixtures/build.mjs 的确定性构造器生成，清单登记其摘要；稳定性用例断言每个夹具的摘要与本记录一致，保证测试跑的是固定真实字节。",
+  "fixtures": {
+    "beam/basic.beam": "b6e1bd1f525671374700699a1a6b32b0a36d49eaa83cea89628c5f6915ccc107",
+    "elf/basic.elf": "9392bc49c90d0598e64fa418f7be182c6fbc6397e4201fda55f95842c2100cd7",
+    "elf/go-buildinfo-inline.elf": "e832d67bd7af4a82e85c493de5f269604a45693d3eb6573c00ebce85aa88f6ae",
+    "elf/go-buildinfo-pointer.elf": "236a63b74f63765579ba74fefa95363e7a32e9efaf456975057c3844eb6833d1",
+    "elf/rust-dep-v0.elf": "986638975d10e646a5a53cf359531b416b3eee7e75360436b9be3a509958c79b",
+    "gguf/basic.gguf": "22a6840495e1735b24116ab2567667722ed5c240a1c61a56813ff818215f402f",
+    "mach-o/basic.macho": "691b8e3c1295f8538a5b44a8aaeea1a64d3fb94410371ce5b2502cdbc8947965",
+    "mach-o/code-signature.macho": "766459afc1ef2cee78995e8adffdbea94e7582b57c8981cb064797321f1d20ae",
+    "pe/basic.pe": "d819d20419b50f56bda3583fad03da465104191469aa1bfd8bd298d7fe623700",
+    "pe/checksum-nonzero.pe": "f5c529c569a6cbc1d8399e95be1937f9620de8873f7138a872eb10f3ae94041c",
+    "pe/security-directory.pe": "78e5b5f918de5787588852edadcbec726379cd6a6a83b190bb2e93db66b4db6c",
+    "pyc/hash-based-check-source.pyc": "949bd8e08248827dd5d646a5fa205e4491c1a10ae294ed6751ae769dacadca30",
+    "safetensors/basic.safetensors": "6d5d09a1fd1f14e46f2610ec1c92a68b7564ebffa746de71d4bd537ef501a5c1",
+    "sample-app/LICENSE": "811eacadef9d2815f5a6d72032f637f159f8de7a410bd23f3673857f91bc51be",
+    "sample-app/README.md": "0121b6198c24bc38cbf5caf8e331c24be51acfb87ab5e09988609d6d29330b8a",
+    "sample-app/config/overrides.json": "ac1c73320a1b37eb1911847a63051e9d99819d1abf4805cbba36ddabc040f572",
+    "sample-app/config/settings.json": "fea86119748c565a0e4657bc139663b1db8ceb4f95afacdbe5e3f4d302546fb5",
+    "sample-app/package.json": "06d8b078bc6d1045652250ac9cde6ff1583e9319d012ac39fc7b98bad6c683a8",
+    "sample-app/src/main.js": "4ec4d7172ba7ca379d91252959afd72843907d79f3192f1102a4c64a1e010edc",
+    "sample-app/src/version.js": "0b9b44a9e3aab3fa2e0fa535b68a2ff99d3eaa9c8c83a2d4b8ca935a4a442833",
+    "unsupported/apk-signature-scheme.apk": "87c2c85073408db26b2959bf86b4516faf221a77f95c4d19d124e0f150d37e8a",
+    "unsupported/global-metadata.dat": "f0773af68c09fca7647d904e384116899a6973883f300b7c8c2ec50810f51159",
+    "zip/mixed-entries.zip": "5ad339ebe2e6169fd04f6682b4b5ea3886fb7dc578da075e9aaf7fd1e9cd9eee"
+  }
+}

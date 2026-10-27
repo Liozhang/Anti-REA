@@ -1,0 +1,6 @@
+{
+  "name": "anti-rea-test-fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "description": "测试夹具包名，避免与示例应用的包名混淆"
+}

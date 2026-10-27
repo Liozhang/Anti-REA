@@ -1,0 +1,8 @@
+{
+  "name": "sample-app",
+  "version": "1.4.2",
+  "private": true,
+  "description": "Anti-REA 端到端测试用的普通应用目录",
+  "main": "src/main.js",
+  "license": "MIT"
+}

@@ -1,0 +1,9 @@
+{
+  "appName": "sample-app",
+  "greeting": "hello",
+  "logLevel": "info",
+  "features": {
+    "colorOutput": true,
+    "verboseErrors": false
+  }
+}

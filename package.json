@@ -1,0 +1,32 @@
+{
+  "name": "anti-rea",
+  "version": "0.1.0",
+  "description": "面向用户自有软件的离线审计与加固工具，附带共用同一套工作流的 MCP（Model Context Protocol，模型上下文协议）服务与命令行。",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "anti-rea": "bin/anti-rea.js",
+    "anti-rea-mcp": "bin/anti-rea-mcp.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "scripts",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "mcp:smoke": "node scripts/mcp-smoke.mjs",
+    "fixtures:build": "node tests/fixtures/build.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {},
+  "license": "MIT"
+}

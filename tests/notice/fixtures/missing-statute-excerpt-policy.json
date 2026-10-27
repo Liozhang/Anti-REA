@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "legal": {
+    "subject": "示例主体",
+    "contact": "security@example.com",
+    "jurisdiction": "示例辖区",
+    "licenseId": "MIT",
+    "licenseTextSource": "https://example.com/LICENSE",
+    "prohibitedActs": ["逆向工程"],
+    "consequences": [
+      {
+        "statement": "本条附有真实法条摘录。",
+        "statuteExcerpt": "示例法条摘录：用户提供的真实法条文本。"
+      },
+      {
+        "statement": "本条缺少法条摘录，必须被拒写。"
+      }
+    ]
+  }
+}
