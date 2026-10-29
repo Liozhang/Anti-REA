@@ -6,16 +6,27 @@
 // 用法：node scripts/mcp-smoke.mjs
 
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const SERVER_ENTRY = resolve(REPO_ROOT, 'bin', 'anti-rea-mcp.js');
-const SAMPLE_APP = resolve(REPO_ROOT, 'tests', 'fixtures', 'sample-app');
+// 自检目标：仓库检出优先用测试夹具；安装副本没有 tests/ 目录（files 字段不含它），
+// 退到随包发布的探针模板。两种布局下冒烟都必须跑通，否则发布出去的包装着跑不了的自检。
+const REPO_SAMPLE_APP = resolve(REPO_ROOT, 'tests', 'fixtures', 'sample-app');
+const PACKAGED_SAMPLE = resolve(REPO_ROOT, 'templates', 'probe-kit', 'runtime-probe.template.mjs');
+const SAMPLE_APP = existsSync(REPO_SAMPLE_APP) ? REPO_SAMPLE_APP : PACKAGED_SAMPLE;
 
-/** 期望见到的四个工具名。 */
-const EXPECTED_TOOLS = Object.freeze(['audit_artifact', 'harden_artifact', 'verify_artifact', 'generate_notice']);
+/** 期望见到的工具名，五个工具一个都不能少。 */
+const EXPECTED_TOOLS = Object.freeze([
+  'audit_artifact',
+  'harden_artifact',
+  'verify_artifact',
+  'generate_notice',
+  'generate_probe_kit',
+]);
 
 /** 单步等待上限，毫秒。 */
 const STEP_TIMEOUT_MS = 20000;
@@ -124,7 +135,7 @@ async function main() {
       await request('initialize', {
         protocolVersion: '2025-06-18',
         capabilities: {},
-        clientInfo: { name: 'anti-rea-mcp-smoke', version: '0.1.0' },
+        clientInfo: { name: 'anti-rea-mcp-smoke', version: '0.1.1' },
       }),
     );
     assert(typeof init.protocolVersion === 'string' && init.protocolVersion !== '', 'initialize 未返回 protocolVersion');

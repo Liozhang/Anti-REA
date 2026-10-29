@@ -2,15 +2,20 @@
 // 覆盖三类输入：正常输入、畸形输入、资源超限下的部分读取。
 
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import { EXIT_CODES } from '../src/cli/exit-codes.mjs';
 import { runCli as runCliSubprocess, runNode, SAMPLE_APP } from './helpers/cli.mjs';
 import { runCli } from '../src/cli/index.mjs';
 import { createMcpServer } from '../src/mcp/server.mjs';
+
+/** 仓库根目录。 */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * 进程内运行命令行，收集退出码与输出，避免每条畸形输入都起子进程。
@@ -560,3 +565,36 @@ test('MCP tools/call 对用法错误返回 isError，对拒否返回含 omitted_
 });
 
 
+
+test('发布布局下冒烟自检可用：没有 tests/ 时退到随包发布的探针模板', async () => {
+  // 实测背景：安装副本里跑冒烟失败，自检目标指向 tests/fixtures/sample-app，
+  // 而 package.json 的 files 字段不含 tests/，发布出去的包装着一个跑不了的自检。
+  // 这个用例按发布布局拼一个临时包，确保缺陷不复发。
+  const root = await mkdtemp(join(tmpdir(), 'anti-rea-pack-'));
+  try {
+    for (const entry of ['bin', 'src', 'templates', 'scripts']) {
+      await cp(join(REPO_ROOT, entry), join(root, entry), { recursive: true });
+    }
+    await cp(join(REPO_ROOT, 'package.json'), join(root, 'package.json'));
+    await stat(join(root, 'tests')).then(
+      () => assert.fail('临时包不应包含 tests/，否则本用例失去意义'),
+      () => {},
+    );
+    const result = await new Promise((resolvePromise, rejectPromise) => {
+      execFile(process.execPath, [join(root, 'scripts', 'mcp-smoke.mjs')], { cwd: root, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error !== null && error.code === undefined) {
+          rejectPromise(error);
+          return;
+        }
+        resolvePromise({ code: error?.code ?? 0, stdout, stderr });
+      });
+    });
+    assert.equal(result.code, 0, `发布布局下的冒烟应通过：${result.stderr}`);
+    assert.match(result.stdout, /MCP 冒烟验证通过/);
+    for (const tool of ['audit_artifact', 'harden_artifact', 'verify_artifact', 'generate_notice', 'generate_probe_kit']) {
+      assert.ok(result.stdout.includes(tool), `工具清单缺少 ${tool}`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
