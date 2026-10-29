@@ -22,8 +22,8 @@ Zero-dependency Node.js. Everything runs locally. Requires Node.js 22 or newer.
 ---
 
 > [!IMPORTANT]
-> Get Anti-REA from this repository only. It has no npm release yet, and a
-> similarly named package does not establish that a download is official.
+> Install Anti-REA from npm (`anti-rea`) or clone this repository. A similarly
+> named package does not establish that a download is official.
 > Use it on software you own or are authorized to protect.
 
 REA (Reverse Engineer Anything) and similar MCP-based toolchains let an AI agent inspect a
@@ -65,31 +65,45 @@ The same three workflows back the MCP tools and the CLI, so an agent and a termi
 identical results and identical exit codes: 0 for a completed audit or hardening run, 1 for a
 failed verification, 2 for a usage error, 3 for a refusal.
 
+## Install
+
+```bash
+npx anti-rea --help            # run once without installing
+npm install --global anti-rea  # or install both commands globally
+anti-rea --help
+```
+
+Requires Node.js 22 or newer. The package has no dependencies, and everything
+runs locally.
+
 ## Connect your agent
 
-Register the server with any MCP-capable agent (Claude Code, Cursor, Codex, and others):
+After a global install, register the server with any MCP-capable agent
+(Claude Code, Cursor, Codex, and others):
 
 ```json
 {
   "mcpServers": {
     "anti-rea": {
-      "command": "node",
-      "args": ["/absolute/path/to/Anti-REA/bin/anti-rea-mcp.js"]
+      "command": "anti-rea-mcp"
     }
   }
 }
 ```
+
+Working from a clone instead of the global install? Point `command` at
+`node` with `args` set to the absolute path of `bin/anti-rea-mcp.js`.
 
 Then ask your agent: *audit my app at /path/to/app and tell me what it leaks.*
 
 ## Quick start from the terminal
 
 ```bash
-node bin/anti-rea.js audit /absolute/path/to/your/app --json
-node bin/anti-rea.js harden /absolute/path/to/your/app --from audit.json
-node bin/anti-rea.js verify /absolute/path/to/your/app
-node bin/anti-rea.js notice --template license > NOTICE.md
-node bin/anti-rea.js probe /absolute/path/to/probe-kit-output
+anti-rea audit /absolute/path/to/your/app --json
+anti-rea harden /absolute/path/to/your/app --from audit.json
+anti-rea verify /absolute/path/to/your/app
+anti-rea notice --template license > NOTICE.md
+anti-rea probe /absolute/path/to/probe-kit-output
 ```
 
 The `probe` command writes an integration package for the runtime observation resistance

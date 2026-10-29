@@ -22,7 +22,7 @@
 ---
 
 > [!IMPORTANT]
-> 请只从本仓库获取 Anti-REA。它尚未发布到 npm，名称相似的包不代表下载来源是官方的。
+> 请从 npm（`anti-rea`）安装，或克隆本仓库。名称相似的包不代表下载来源是官方的。
 > 请只将其用于你拥有或获授权保护的软件。
 
 REA（Reverse Engineer Anything，逆向一切）及同类工具链，能让一个人工智能代理在看不到源码的情况下检查出厂的可执行文件、软件包或应用程序。代理可以解释某个功能的工作原理，并仿制出一个版本。这把理解你发行的软件所需的成本压到了接近零。
@@ -47,31 +47,42 @@ Anti-REA 是防御方的对应物。它是一个 MCP 服务，附带一套共用
 
 这三个工作流同时支撑 MCP 工具与命令行，因此代理和终端得到相同的结果与相同的退出码：审计或加固正常完成为 0，复审不通过为 1，用法错误为 2，拒否为 3。
 
+## 安装
+
+```bash
+npx anti-rea --help            # 不安装，直接跑一次
+npm install --global anti-rea  # 或全局安装两个命令
+anti-rea --help
+```
+
+要求 Node.js 22 或更高版本。包零依赖，全部分析在本地完成。
+
 ## 接入你的代理
 
-用任意支持 MCP 的代理（Claude Code、Cursor、Codex 等）注册本服务：
+全局安装后，用任意支持 MCP 的代理（Claude Code、Cursor、Codex 等）注册本服务：
 
 ```json
 {
   "mcpServers": {
     "anti-rea": {
-      "command": "node",
-      "args": ["/absolute/path/to/Anti-REA/bin/anti-rea-mcp.js"]
+      "command": "anti-rea-mcp"
     }
   }
 }
 ```
+
+如果是从克隆的仓库直接用，把 `command` 改成 `node`，`args` 指向 `bin/anti-rea-mcp.js` 的绝对路径。
 
 然后对你的代理说：审计 /path/to/app 这个应用，告诉我它暴露了什么。
 
 ## 终端快速开始
 
 ```bash
-node bin/anti-rea.js audit /absolute/path/to/your/app --json
-node bin/anti-rea.js harden /absolute/path/to/your/app --from audit.json
-node bin/anti-rea.js verify /absolute/path/to/your/app
-node bin/anti-rea.js notice --template license > NOTICE.md
-node bin/anti-rea.js probe /absolute/path/to/probe-kit-output
+anti-rea audit /absolute/path/to/your/app --json
+anti-rea harden /absolute/path/to/your/app --from audit.json
+anti-rea verify /absolute/path/to/your/app
+anti-rea notice --template license > NOTICE.md
+anti-rea probe /absolute/path/to/probe-kit-output
 ```
 
 probe 命令写出反运行时观察层的集成包：面向可观测事实的检测代码片段，外加一份人工检查清单。它只写你指定的目录，不改动你的制品。代理侧用 `generate_probe_kit` 工具拿到同一份集成包。
