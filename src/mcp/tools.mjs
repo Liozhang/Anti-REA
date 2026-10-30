@@ -1,10 +1,12 @@
 // MCP 工具定义：五个工具的名称、说明与输入模式。
 // 工具名与命令行子命令一一对应，且与两份说明文档中列出的接口逐字一致。
 
-/** 服务标识。 */
+import { PACKAGE_VERSION } from '../version.mjs';
+
+/** 服务标识。版本号取自 package.json，与命令行 --version 同一来源。 */
 export const SERVER_INFO = Object.freeze({
   name: 'anti-rea',
-  version: '0.1.2',
+  version: PACKAGE_VERSION,
   title: 'Anti-REA',
 });
 

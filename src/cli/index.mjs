@@ -1,14 +1,13 @@
 // 命令行入口：子命令分发与统一退出码表。
 // 本文件只做分发与错误折算，工作流在 workflows.mjs 与 src/ 各模块中，MCP 服务层共用。
 
-import { readFile } from 'node:fs/promises';
-
 import { AntireaError, RefusalError, describeError } from '../errors.mjs';
 import { EXIT_CODES, EXIT_CODE_LABELS } from './exit-codes.mjs';
 import { parseArgs } from './args.mjs';
 import { commandAudit, commandHarden, commandNotice, commandProbe, commandVerify } from './commands.mjs';
 import { buildRefusalReport, createTreeWarner } from './workflows.mjs';
 import { USAGE } from './usage.mjs';
+import { PACKAGE_VERSION } from '../version.mjs';
 
 /** 子命令到工作流的映射。 */
 const COMMANDS = Object.freeze({
@@ -18,20 +17,6 @@ const COMMANDS = Object.freeze({
   notice: commandNotice,
   probe: commandProbe,
 });
-
-/**
- * 读取包版本，用于 --version。
- * @returns {Promise<string>}
- */
-async function readVersion() {
-  try {
-    const url = new URL('../../package.json', import.meta.url);
-    const text = await readFile(url, 'utf8');
-    return JSON.parse(text).version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
 
 /**
  * 运行命令行。
@@ -55,7 +40,7 @@ export async function runCli(argv, io = {}) {
     return EXIT_CODES.SUCCESS;
   }
   if (parsed.version) {
-    out(`anti-rea ${await readVersion()}\n`);
+    out(`anti-rea ${PACKAGE_VERSION}\n`);
     return EXIT_CODES.SUCCESS;
   }
 
