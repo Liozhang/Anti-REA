@@ -133,7 +133,9 @@ test('等长覆写类缓解与可豁免项一一对应', () => {
   const exemptedBy = (itemId) => elf.find((item) => item.id === itemId).exemptedBy;
   assert.deepEqual(exemptedBy('elf.section.symtab'), ['metadata.elf-symtab-clear']);
   assert.deepEqual(exemptedBy('elf.section.strtab'), ['metadata.elf-symtab-clear']);
-  assert.ok(exemptedBy('elf.section.note').includes('metadata.elf-symtab-clear'));
+  // note 节只对构建标识清零措施豁免：该措施清零 note 里的描述符字节；
+  // 符号表清零不触及 note，给它豁免等于白送一道免检。
+  assert.deepEqual(exemptedBy('elf.section.note'), ['metadata.elf-build-id-note-overwrite']);
   assert.ok(exemptedBy('elf.section.go-buildinfo').includes('metadata.go-buildinfo-inline-overwrite'));
   assert.ok(exemptedBy('elf.section.go-buildinfo').includes('metadata.go-buildinfo-pointer-overwrite'));
   assert.ok(exemptedBy('elf.section.go-buildinfo').includes('metadata.go-buildinfo-writable-region-overwrite'));
@@ -195,11 +197,18 @@ test('施加记录按对象形状识别，与编号数组等价', () => {
   assert.deepEqual(fromRecord, fromArray);
 });
 
-test('符号表清零同时豁免符号表、字符串表与 note 三项', () => {
+test('符号表清零只豁免符号表与字符串表，不白送 note 节', () => {
   const result = deriveExemptions(['metadata.elf-symtab-clear'], REQUIRED_SETS.elf.items);
-  assert.deepEqual(result.exempted.sort(), ['elf.section.note', 'elf.section.strtab', 'elf.section.symtab']);
+  assert.deepEqual(result.exempted.sort(), ['elf.section.strtab', 'elf.section.symtab']);
+  assert.ok(result.required.includes('elf.section.note'), '符号表清零不触及 note，note 必须仍按可解析校验');
   assert.ok(result.required.includes('elf.program-headers'), '程序头不因符号表清零而豁免');
   assert.ok(result.required.includes('elf.section.dynsym'), '动态符号表不因静态符号表清零而豁免');
+});
+
+test('构建标识清零豁免 note 节', () => {
+  const result = deriveExemptions(['metadata.elf-build-id-note-overwrite'], REQUIRED_SETS.elf.items);
+  assert.deepEqual(result.exempted.sort(), ['elf.section.note']);
+  assert.ok(result.required.includes('elf.section.symtab'), '构建标识清零不触及符号表');
 });
 
 test('pyc 哈希清零同时豁免源哈希与 check_source 标志', () => {

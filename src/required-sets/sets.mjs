@@ -104,8 +104,8 @@ export const REQUIRED_SETS = Object.freeze({
         id: 'elf.section.note',
         kind: 'section',
         label: '.note 节',
-        requirement: '构建标识等 note 段；符号表清零措施声明可能触及 note，命中后按豁免处理',
-        exemptedBy: ['metadata.elf-symtab-clear'],
+        requirement: '构建标识等 note 段；构建标识清零措施只清零描述符字节、note 结构仍可解析，该项对它豁免；符号表清零不触及 note，不豁免',
+        exemptedBy: ['metadata.elf-build-id-note-overwrite'],
       },
       {
         id: 'elf.section.dynamic',
