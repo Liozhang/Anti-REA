@@ -274,7 +274,7 @@ async function readZip(context) {
       report.reason = local.reason;
       report.coverage = 'not-scanned';
       rawOnlyCount += 1;
-      limitations.push(limitation('zip-local-entry-unreadable', `条目 ${zipEntry.name} 的本地文件头不可用：${local.reason}。该条目只按中央目录记录登记，内容没有扫描`));
+      limitations.push(limitation('zip-local-entry-unreadable', `条目 ${zipEntry.name} 的本地文件头不可用：${local.reason}。该条目只按中央目录记录登记，内容没有扫描`, 'entry', zipEntry.name));
       entryReports.push(report);
       continue;
     }
@@ -291,6 +291,8 @@ async function readZip(context) {
           limitation(
             'zip-entry-crc-mismatch',
             `条目 ${zipEntry.name} 的原始字节 CRC32 为 0x${crc.toString(16)}，与中央目录记录的 0x${zipEntry.crc32.toString(16)} 不一致；条目内容可能已被改动，或本地文件头与中央目录不同帧`,
+            'entry',
+            zipEntry.name,
           ),
         );
       }
@@ -323,6 +325,8 @@ async function readZip(context) {
           limitation(
             'zip-entry-inflate-over-budget',
             `条目 ${zipEntry.name} 声明的未压缩大小为 ${zipEntry.uncompressedSize} 字节，超出本次解压预算 ${inflateCap} 字节，未解压，只按原始压缩字节扫描；压缩内容里的可提取事实本次没有覆盖，不等于不存在`,
+            'entry',
+            zipEntry.name,
           ),
         );
         const scan = scanTokens(local.raw);
@@ -342,6 +346,8 @@ async function readZip(context) {
             limitation(
               'zip-entry-inflate-failed',
               `条目 ${zipEntry.name} 用 node:zlib 解压失败，或解压输出超出预算 ${inflateCap} 字节，只按原始压缩字节扫描；压缩内容里的可提取事实本次没有覆盖，不等于不存在`,
+              'entry',
+              zipEntry.name,
             ),
           );
           const scan = scanTokens(local.raw);
@@ -357,20 +363,24 @@ async function readZip(context) {
           }
           scannedEntryCount += 1;
           if (!report.crcMatch) {
-            limitations.push(
-              limitation(
-                'zip-entry-crc-mismatch',
-                `条目 ${zipEntry.name} 解压后 CRC32 为 0x${crc.toString(16)}，与中央目录记录的 0x${zipEntry.crc32.toString(16)} 不一致；条目内容可能已被改动`,
-              ),
-            );
+              limitations.push(
+                limitation(
+                  'zip-entry-crc-mismatch',
+                  `条目 ${zipEntry.name} 解压后 CRC32 为 0x${crc.toString(16)}，与中央目录记录的 0x${zipEntry.crc32.toString(16)} 不一致；条目内容可能已被改动`,
+                  'entry',
+                  zipEntry.name,
+                ),
+              );
           }
           if (inflated.length !== zipEntry.uncompressedSize) {
-            limitations.push(
-              limitation(
-                'zip-entry-size-mismatch',
-                `条目 ${zipEntry.name} 解压后 ${inflated.length} 字节，与中央目录记录的未压缩大小 ${zipEntry.uncompressedSize} 不一致`,
-              ),
-            );
+              limitations.push(
+                limitation(
+                  'zip-entry-size-mismatch',
+                  `条目 ${zipEntry.name} 解压后 ${inflated.length} 字节，与中央目录记录的未压缩大小 ${zipEntry.uncompressedSize} 不一致`,
+                  'entry',
+                  zipEntry.name,
+                ),
+              );
           }
           const scan = scanTokens(inflated);
           findings.push(...tokenFindings(scan, { path, reader: 'zip', source: 'deflate-entry-decompressed-bytes' }));
@@ -388,6 +398,8 @@ async function readZip(context) {
         limitation(
           'zip-entry-method-unsupported',
           `条目 ${zipEntry.name} 的压缩方法为 ${METHODS[zipEntry.method] ?? zipEntry.method}，v1 只用 node:zlib 处理存储与 deflate 两类；该条目内容本次没有覆盖，不等于不存在`,
+          'entry',
+          zipEntry.name,
         ),
       );
       const scan = scanTokens(local.raw);
@@ -414,6 +426,8 @@ async function readZip(context) {
         limitation(
           'zip-nested-dex-entry-limit',
           `DEX 条目数达到递归上限 ${NESTED_DEX_ENTRY_LIMIT}，条目 ${candidate.name} 及其后的 DEX 条目本次没有解析；这些条目不等于没有暴露，只是本次没有提取到事实`,
+          'entry',
+          candidate.name,
         ),
       );
       break;
@@ -423,6 +437,8 @@ async function readZip(context) {
         limitation(
           'zip-nested-dex-bytes-limit',
           `DEX 条目累计字节数达到上限 ${NESTED_DEX_BYTES_LIMIT}，条目 ${candidate.name} 及其后的 DEX 条目本次没有解析；这些条目不等于没有暴露，只是本次没有提取到事实`,
+          'entry',
+          candidate.name,
         ),
       );
       break;
@@ -436,6 +452,8 @@ async function readZip(context) {
       dexLimitations.push({
         ...note,
         message: `条目 ${candidate.name}：${note.message}`,
+        // 消息前缀带了内层条目名：同样结构化带上，供脱敏精确替换。
+        path: candidate.name,
       });
     }
   }
@@ -443,12 +461,16 @@ async function readZip(context) {
   limitations.push(...dexLimitations);
 
   // 未递归的嵌套容器排除 DEX：DEX 已经解析，再报一条“没有跟进”会自相矛盾。
+  // 逐个登记而不是合并成一条：每条都要带上自己的条目路径，脱敏才能精确替换；
+  // 合并成一条时路径只能按形态猜，无扩展名的成员名会漏过去。
   const unfollowed = nestedContainers.filter((nested) => nested.container !== 'dex');
-  if (unfollowed.length > 0) {
+  for (const nested of unfollowed) {
     limitations.push(
       limitation(
         'zip-nested-container-not-followed',
-        `条目 ${unfollowed.map((nested) => `${nested.name}（${nested.container}）`).join('、')} 的内容本身是容器；v1 只递归解析 DEX 一类，其余嵌套层内的事实本次没有覆盖`,
+        `条目 ${nested.name} 的内容本身是 ${nested.container} 容器；v1 只递归解析 DEX 一类，该嵌套层内的事实本次没有覆盖，不等于不存在`,
+        'entry',
+        nested.name,
       ),
     );
   }

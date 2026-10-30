@@ -43,11 +43,12 @@ export function defineReader({ id, formats, layers, purpose, read }) {
         return {
           findings: [],
           limitations: [
-            {
-              code: 'reader-error',
-              message: `读取器 ${id} 在解析 ${context?.entry?.relativePath ?? '未知条目'} 时遇到意外错误：${String(error?.message ?? error)}。该条目不等于没有暴露，只是本次没有提取到事实`,
-              scope: 'entry',
-            },
+            limitation(
+              'reader-error',
+              `读取器 ${id} 在解析 ${context?.entry?.relativePath ?? '未知条目'} 时遇到意外错误：${String(error?.message ?? error)}。该条目不等于没有暴露，只是本次没有提取到事实`,
+              'entry',
+              context?.entry?.relativePath,
+            ),
           ],
         };
       }
@@ -60,10 +61,17 @@ export function defineReader({ id, formats, layers, purpose, read }) {
  * @param {string} code 限制标识
  * @param {string} message 面向用户的说明，说明缺什么、对结论的影响
  * @param {'entry' | 'artifact'} [scope] 作用范围
- * @returns {{code: string, message: string, scope: string}}
+ * @param {string} [path] 消息里出现的条目路径。消息是自由文本，路径一旦只以文本形态
+ *   存在，脱敏就只能按路径形态猜，猜不出无扩展名的产物内相对路径；这里结构化带上，
+ *   让脱敏可以精确整条替换。与 scope 无关，任何携带路径的说明都该传。
+ * @returns {{code: string, message: string, scope: string, path?: string}}
  */
-export function limitation(code, message, scope = 'entry') {
-  return { code, message, scope };
+export function limitation(code, message, scope = 'entry', path = null) {
+  const note = { code, message, scope };
+  if (typeof path === 'string' && path !== '') {
+    note.path = path;
+  }
+  return note;
 }
 
 /**

@@ -63,6 +63,8 @@ export async function auditArtifact(target, options = {}) {
       code: 'audit-entry-skipped',
       message: `条目 ${skipped.relativePath} 在识别阶段即不可读（${skipped.reason}），本次没有提取到任何事实。该条目不等于没有暴露，只是本次没有参与审计`,
       scope: 'entry',
+      // 消息里带了条目路径：结构化带上，脱敏才能精确替换而不是按路径形态猜。
+      path: skipped.relativePath,
     });
   }
 
