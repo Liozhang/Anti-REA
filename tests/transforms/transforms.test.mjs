@@ -5,7 +5,7 @@
 // 部分读取与资源上限（单文件上限极小值时全部跳过并附限制说明）。
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -41,6 +41,7 @@ import {
   buildPe,
   buildPeWithDebugDirectory,
   buildPyc,
+  buildPycWithTokenAt,
   buildSafetensors,
   buildZip,
 } from './fixture-bytes.mjs';
@@ -878,7 +879,7 @@ test('逐发现循环调用 apply 时多项措施叠加，不会互相覆盖', a
   const pathLength = 'D:\build\agent\app.pdb'.length;
   assert.equal(
     hardened.toString('latin1', peFixture.codeviewPathOffset, peFixture.codeviewPathOffset + pathLength + 1),
-    ' '.repeat(pathLength + 1),
+    '\u0000'.repeat(pathLength + 1),
   );
   const after = await auditArtifact(`${path}${DEFAULT_OUTPUT_SUFFIX}`, {});
   assert.equal(after.findings.some((item) => item.category === 'go-buildinfo'), false);
@@ -931,4 +932,114 @@ test('容器不匹配的措施跳过并说明适用范围', async () => {
   assert.equal(result.applied.length, 0);
   assert.match(result.skipped[0].reason, /该措施适用于/);
   assert.equal(findings.length > 0, true);
+});
+
+// ---- 令牌覆写：扫描窗口与匹配长度 ----
+
+/**
+ * PyPI 长令牌：模式匹配长 119 字节，超过摘录上限 96 字符。
+ * 修复前，超出覆写侧扫描窗口的命中找不到完整匹配，会按摘录长度只覆写约 97 字节，
+ * 把二十余字节秘密原文留在文件里，而报告显示已施加、退出码为 0。
+ */
+const LONG_PYPI_TOKEN = `pypi-AgEIcHlwaS5vcmc${'Z'.repeat(100)}`;
+/** 覆写侧扫描窗口之内的偏移：1 MiB。 */
+const TOKEN_OFFSET_INSIDE = 1 * 1024 * 1024;
+/** 覆写侧扫描窗口之外、读取器窗口之内的偏移：9 MiB。 */
+const TOKEN_OFFSET_BEYOND = 9 * 1024 * 1024;
+
+/**
+ * 断言加固产物中令牌占用的每一个字节都已清零。
+ * @param {Buffer} hardened 加固后字节
+ * @param {number} offset 令牌起始偏移
+ * @param {number} length 令牌长度
+ * @returns {void}
+ */
+function assertTokenFullyCleared(hardened, offset, length) {
+  const residue = [];
+  for (let index = 0; index < length; index += 1) {
+    if (hardened[offset + index] !== 0) {
+      residue.push(offset + index);
+    }
+  }
+  assert.deepEqual(residue, [], `令牌仍有 ${residue.length} 个字节未清零`);
+}
+
+test('扫描窗口内的长令牌完整覆写，不留残余字节', async () => {
+  const { path, findings } = await fixture('token-inside.pyc', buildPycWithTokenAt({ offset: TOKEN_OFFSET_INSIDE, token: LONG_PYPI_TOKEN }));
+  const finding = findingOf(findings, 'secret.token-placeholder-overwrite');
+
+  const result = await applyMitigations({ target: path, findings: [finding], policy: {} });
+  assert.equal(result.applied.length, 1);
+  assert.equal(result.applied[0].mitigation, 'secret.token-placeholder-overwrite');
+
+  const hardened = await readFile(result.artifact.outputPath);
+  const original = await readFile(path);
+  assert.equal(hardened.length, original.length, '等长覆写必须保持字节数不变');
+  assertTokenFullyCleared(hardened, finding.detail.fileOffset, LONG_PYPI_TOKEN.length);
+
+  // 复审视角：重新审计后该令牌不再被任何模式命中。
+  const after = await auditArtifact(result.artifact.outputPath, {});
+  assert.equal(after.findings.some((item) => item.detail?.patternId === 'pypi-token'), false);
+});
+
+test('超出覆写侧扫描窗口的长令牌同样完整覆写，不留残余字节', async () => {
+  const { path, findings } = await fixture('token-beyond.pyc', buildPycWithTokenAt({ offset: TOKEN_OFFSET_BEYOND, token: LONG_PYPI_TOKEN }));
+  const finding = findingOf(findings, 'secret.token-placeholder-overwrite');
+  assert.equal(finding.detail.fileOffset, TOKEN_OFFSET_BEYOND);
+
+  const result = await applyMitigations({ target: path, findings: [finding], policy: {} });
+  assert.equal(result.applied.length, 1, '窗口外的令牌不得被跳过，也不得部分覆写');
+  assert.equal(result.applied[0].mitigation, 'secret.token-placeholder-overwrite');
+
+  const hardened = await readFile(result.artifact.outputPath);
+  const original = await readFile(path);
+  assert.equal(hardened.length, original.length, '等长覆写必须保持字节数不变');
+  assertTokenFullyCleared(hardened, finding.detail.fileOffset, LONG_PYPI_TOKEN.length);
+
+  const after = await auditArtifact(result.artifact.outputPath, {});
+  assert.equal(after.findings.some((item) => item.detail?.patternId === 'pypi-token'), false);
+});
+
+// ---- 写出原子性 ----
+
+test('写出中途失败不留下损坏副本，也不留下临时文件', async () => {
+  const { path, findings } = await fixture('atomic-fail.elf', buildElfGoInline().buffer);
+  const finding = findingOf(findings, 'metadata.go-buildinfo-inline-overwrite');
+  const outputPath = `${path}${DEFAULT_OUTPUT_SUFFIX}`;
+
+  await assert.rejects(
+    () =>
+      applyMitigations({
+        target: path,
+        findings: [finding],
+        policy: {},
+        io: {
+          writeFile: async () => {
+            throw new Error('磁盘空间不足');
+          },
+        },
+      }),
+    /无法写出加固产物/,
+  );
+
+  // 最终路径上什么都没有：不存在长度不足的损坏副本。
+  await assert.rejects(() => readFile(outputPath), /ENOENT/);
+  // 输出目录里没有临时文件残留。
+  const leftovers = (await readdir(workDir)).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, [], `写出失败后不得留下临时文件：${leftovers.join('、')}`);
+});
+
+test('成功写出后输出目录不留临时文件', async () => {
+  const { path, findings } = await fixture('atomic-ok.elf', buildElfGoInline().buffer);
+  const finding = findingOf(findings, 'metadata.go-buildinfo-inline-overwrite');
+
+  const result = await applyMitigations({ target: path, findings: [finding], policy: {} });
+  assert.equal(result.wrote, true);
+
+  const leftovers = (await readdir(workDir)).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, [], `成功写出后不得留下临时文件：${leftovers.join('、')}`);
+  // 产物本身完整可读。
+  const hardened = await readFile(result.artifact.outputPath);
+  const original = await readFile(path);
+  assert.equal(hardened.length, original.length);
 });

@@ -14,9 +14,9 @@
 // 全部读取与写入都在进程内完成：不启动目标、不附加进程、不发起网络请求，只用 Node.js 内置模块。
 
 import { createHash } from 'node:crypto';
-import { readFile as readFileFs, stat as statFs, writeFile as writeFileFs } from 'node:fs/promises';
+import { readFile as readFileFs, rename as renameFs, stat as statFs, unlink as unlinkFs, writeFile as writeFileFs } from 'node:fs/promises';
 
-import { NotImplementedError, UsageError } from '../errors.mjs';
+import { BusinessError, NotImplementedError, UsageError } from '../errors.mjs';
 import { MITIGATION_IDS } from '../audit/finding.mjs';
 import {
   clearElfBuildIdNotes,
@@ -36,6 +36,12 @@ export const TRANSFORM_BATCH_SCHEMA = 'anti-rea.transform-batch/1';
 
 /** 加固产物默认后缀：与目标同目录，避免覆盖原件。 */
 export const DEFAULT_OUTPUT_SUFFIX = '.hardened';
+
+/**
+ * 写出过程中的临时文件后缀：与产物同目录，保证改名是同一文件系统内的原子操作。
+ * 单目标单进程假设：同一输出路径的两次并发加固会争用同一临时路径，属于调用方需要避免的用法。
+ */
+const TEMPORARY_OUTPUT_SUFFIX = '.tmp';
 
 /**
  * 逐发现施加用的进程内工作缓冲区：键为“输入路径加输出路径”。
@@ -282,6 +288,7 @@ export function transformsOfKind(kind) {
  *   metadata?: Record<string, string | string[]>,
  *   compose?: boolean,
  *   io?: {readFile?: Function, writeFile?: Function, stat?: Function},
+ *     readFile、writeFile 与 stat 可注入以便测试；改名与临时文件清理不走注入，始终用真实文件系统。
  * }} input compose 为真时按进程内工作缓冲区组合多项措施，仅供逐发现施加入口使用
  * @returns {Promise<Record<string, unknown>>} 批量施加结果
  */
@@ -386,7 +393,19 @@ export async function applyMitigations(input) {
   const changed = !state.buffer.equals(inputBytes) && !identicalToExisting;
   const wrote = changed && !identicalToExisting;
   if (wrote) {
-    await write(outputPath, state.buffer);
+    // 先写同目录临时文件，成功后改名为产物路径。直接写最终路径时，写入中途失败
+    // （磁盘满、进程中断、权限变化）会留下一个长度不足的损坏副本：复审对它判失败，
+    // 但没跑复审就分发的用户得到的是坏文件。改名之后，最终路径上要么是完整的旧产物，
+    // 要么是完整的新产物。写入或改名失败时删除临时文件，不让残file 污染输出目录。
+    const temporaryPath = `${outputPath}${TEMPORARY_OUTPUT_SUFFIX}`;
+    try {
+      await write(temporaryPath, state.buffer);
+      await renameFs(temporaryPath, outputPath);
+    } catch (error) {
+      await unlinkFs(temporaryPath).catch(() => {});
+      // 折成业务错误：调用方拿到的是可读原因与退出码 1，而不是裸的文件系统异常。
+      throw new BusinessError(`无法写出加固产物：${outputPath}`, { cause: String(error) });
+    }
   }
 
   const notes = [];

@@ -5,12 +5,13 @@
 
 import { findAll, readUvarint } from '../readers/common.mjs';
 import { GO_BUILDINFO_MAGIC, inspectGoBuildinfo } from '../readers/native-shared.mjs';
-import { scanTokens, TOKEN_PATTERNS } from '../readers/scan.mjs';
+import { scanTokens, TOKEN_PATTERNS, TOKEN_SCAN_WINDOW_BYTES } from '../readers/scan.mjs';
 import { parseElfStructure, parseMachOStructure, parsePeStructure, locateElfBuildIdNotes, locatePeDebugPaths } from './parse.mjs';
 import { findStoredEntryAt, locateZipEntries, patchEntryCrc32 } from './zip-entry.mjs';
 
-/** 令牌扫描窗口，与读取器保持一致，保证重新扫描命中同一批偏移。 */
-const TOKEN_SCAN_WINDOW_BYTES = 8 * 1024 * 1024;
+// 令牌扫描窗口直接取自读取器：审计在读取器的窗口内报告命中，覆写必须在同一窗口内
+// 重新定位。两侧窗口一旦不一致，超出覆写侧窗口的命中会找不到完整匹配，
+// 曾经会按摘录长度部分覆写，把残余的秘密字节留在文件里。
 
 /** ELF 静态符号表节类型。 */
 const SHT_SYMTAB = 2;
@@ -412,10 +413,18 @@ export function overwriteTokenPlaceholder(buffer, finding, containerType) {
     return { ok: false, reason: `按模式 ${patternId} 在偏移 ${expectedOffset} 处重新扫描不到该令牌，可能已被覆写或审计结果已过期` };
   }
   // 重新执行模式取真实匹配长度：摘录超长时会被截断，按摘录长度覆写会留下残余字节。
+  // 重新定位不到完整匹配时拒绝覆写而不是退回摘录长度：部分覆写同样留下残余的秘密字节，
+  // 且不报错、不告警，与“静默跳过视为缺陷”的约定冲突。
   const window = Math.min(buffer.length, TOKEN_SCAN_WINDOW_BYTES);
   pattern.pattern.lastIndex = hit.offset;
   const match = pattern.pattern.exec(buffer.toString('latin1', 0, window));
-  const matchLength = match !== null && match.index === hit.offset ? match[0].length : hit.excerpt.length;
+  if (match === null || match.index !== hit.offset) {
+    return {
+      ok: false,
+      reason: `按模式 ${patternId} 在偏移 ${expectedOffset} 处重新扫描不到完整匹配，拒绝按摘录长度部分覆写，以免残留秘密字节`,
+    };
+  }
+  const matchLength = match[0].length;
 
   const out = Buffer.from(buffer);
 

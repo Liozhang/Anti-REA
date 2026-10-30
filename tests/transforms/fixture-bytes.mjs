@@ -586,6 +586,23 @@ export function buildPyc({ checkSource = true } = {}) {
   return buffer;
 }
 
+/**
+ * 构造 pyc 夹具，把一个令牌放在指定偏移处，其余字节填 0x42。
+ * 令牌前后各放一个零字节：令牌模式用前后断言排除偶然字节串，定界符不是令牌字符。
+ * 用于覆写窗口与匹配长度的回归测试：令牌可以放到覆写侧窗口之外、读取器窗口之内。
+ * @param {{offset: number, token: string}} options
+ * @returns {Buffer}
+ */
+export function buildPycWithTokenAt({ offset, token }) {
+  const head = buildPyc();
+  const buffer = Buffer.alloc(offset + token.length + 512, 0x42);
+  head.copy(buffer, 0);
+  buffer[offset - 1] = 0x00; // 前置定界
+  buffer.write(token, offset, 'latin1');
+  buffer[offset + token.length] = 0x00; // 后置定界
+  return buffer;
+}
+
 // ---- ZIP ----
 
 /** ZIP 本地文件头签名。 */
