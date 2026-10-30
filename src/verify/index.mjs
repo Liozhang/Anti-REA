@@ -46,7 +46,9 @@ const SIGNATURE_OBSERVER_CONTAINERS = Object.freeze(['elf', 'pe', 'mach-o', 'mac
 const CHECKSUM_OBSERVER_CONTAINERS = Object.freeze(['pe', 'zip']);
 
 /** 容器到适用检查族的映射。不适用该容器实际结构的族不出现在报告里，避免用噪音冒充覆盖。 */
-const FAMILIES_BY_CONTAINER = Object.freeze({
+// 每个受支持容器都必须出现在这里：读取失败或预算截断的错误路径要按这份清单逐族记
+// pending，漏登记的容器会在那些路径上拿到 undefined 而崩溃。
+export const FAMILIES_BY_CONTAINER = Object.freeze({
   elf: Object.freeze(['container-parse', 'signature-consistency', 'required-sections']),
   pe: Object.freeze(['container-parse', 'signature-consistency', 'checksum-consistency', 'required-sections']),
   'mach-o': Object.freeze(['container-parse', 'signature-consistency', 'required-sections']),
@@ -56,6 +58,8 @@ const FAMILIES_BY_CONTAINER = Object.freeze({
   safetensors: Object.freeze(['container-parse', 'required-sections']),
   pyc: Object.freeze(['container-parse', 'pyc-flag-consistency', 'required-sections']),
   beam: Object.freeze(['container-parse', 'required-sections']),
+  // DEX 没有登记的签名观察器，因此没有签名族；容器解析与必需集两项都适用。
+  dex: Object.freeze(['container-parse', 'required-sections']),
 });
 
 /**
