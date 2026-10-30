@@ -3,7 +3,7 @@
 // 的确定性构造器生成并提交，摘要登记在 tests/fixtures/manifest.json；
 // 稳定性用例断言每个夹具的 sha256 与清单记录一致，保证测试跑的是固定真实字节。
 
-/** v1 八类格式各至少一个夹具，另加覆盖特定路径的附加夹具与两类范围外格式夹具。 */
+/** v1 九类格式各至少一个夹具，另加覆盖特定路径的附加夹具与两类范围外格式夹具。 */
 export const FIXTURE_SPECS = Object.freeze([
   { id: 'elf-basic', container: 'elf', path: 'elf/basic.elf', covers: 'ELF 节表与符号表解析', status: 'committed' },
   { id: 'elf-go-buildinfo-inline', container: 'elf', path: 'elf/go-buildinfo-inline.elf', covers: 'Go 构建信息 inline 编码', status: 'committed' },

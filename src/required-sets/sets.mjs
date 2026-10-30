@@ -46,7 +46,7 @@ function requiredSet(container, items, note) {
   });
 }
 
-/** v1 八类格式的必需集。键为容器标识，与 container/detect.mjs 的 SUPPORTED_CONTAINERS 对应。 */
+/** v1 九类格式的必需集。键为容器标识，与 container/detect.mjs 的 SUPPORTED_CONTAINERS 对应。 */
 export const REQUIRED_SETS = Object.freeze({
   elf: requiredSet(
     'elf',
@@ -630,6 +630,47 @@ export const REQUIRED_SETS = Object.freeze({
       },
     ],
     'BEAM 必需集按最小可加载子集登记：外层块、编译单元块、块表与 Atom、Code 两类必需块；其余块缺失不阻断加载。',
+  ),
+  dex: requiredSet(
+    'dex',
+    [
+      {
+        id: 'dex.header',
+        kind: 'header',
+        label: 'DEX 头部',
+        requirement: '头部给出各张表的偏移与计数，损坏后无法定位字符串表、类型表与方法表',
+        exemptedBy: [],
+      },
+      {
+        id: 'dex.endian-tag',
+        kind: 'field',
+        label: '字节序标记',
+        requirement: '固定为 0x12345678，标记不符时后续字段的小端解释全部不成立',
+        exemptedBy: [],
+      },
+      {
+        id: 'dex.string-ids',
+        kind: 'index',
+        label: '字符串索引表',
+        requirement: '类型描述符与方法名都经它取出，索引表损坏后名字全部不可恢复',
+        exemptedBy: [],
+      },
+      {
+        id: 'dex.type-ids',
+        kind: 'index',
+        label: '类型索引表',
+        requirement: '类型描述符的入口，运行期类加载依赖它',
+        exemptedBy: [],
+      },
+      {
+        id: 'dex.method-ids',
+        kind: 'index',
+        label: '方法索引表',
+        requirement: '方法表的入口，运行期方法解析依赖它',
+        exemptedBy: [],
+      },
+    ],
+    'DEX 必需集按最小可加载子集登记：头部、字节序标记与字符串、类型、方法三张索引表；字段表、原型表、类定义表与 map 缺失不阻断加载。',
   ),
 });
 

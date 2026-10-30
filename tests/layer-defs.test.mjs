@@ -104,7 +104,7 @@ test('令牌覆写的容器白名单：能覆写的与只报告的分开', () =>
   assert.match(token.functionalRisk, /safetensors/, '功能风险说明必须点明 safetensors 只报告不覆写');
 });
 
-test('必需集覆盖 v1 八类格式的容器标识', () => {
+test('必需集覆盖 v1 九类格式的容器标识', () => {
   for (const container of SUPPORTED_CONTAINERS) {
     assert.ok(REQUIRED_SETS[container] !== undefined, `必需集缺少容器 ${container}`);
   }

@@ -1,4 +1,4 @@
-// readers 模块测试：八类格式的真实夹具、畸形输入与部分读取。
+// readers 模块测试：九类格式的真实夹具、畸形输入与部分读取。
 // 夹具全部在临时目录里按字节级精确构造，不依赖仓库内其他模块的夹具生成进度。
 // 覆盖三条路径：正常输入（事实被提取）、畸形输入（转成限制说明且不抛错）、部分读取（受预算约束时给部分结果加限制说明）。
 
@@ -15,6 +15,7 @@ import { auditArtifact } from '../src/audit/engine.mjs';
 import { redactReport } from '../src/report/redact.mjs';
 import { beamReader } from '../src/readers/beam.mjs';
 import { crc32Of } from '../src/readers/zip.mjs';
+import { dexReader } from '../src/readers/dex.mjs';
 import { elfReader } from '../src/readers/elf.mjs';
 import { ggufReader } from '../src/readers/gguf.mjs';
 import { machoReader } from '../src/readers/macho.mjs';
@@ -24,6 +25,7 @@ import { overwriteTokenPlaceholder } from '../src/transforms/equal-length.mjs';
 import { safetensorsReader } from '../src/readers/safetensors.mjs';
 import { zipReader } from '../src/readers/zip.mjs';
 import { scanTokens, TOKEN_PATTERNS } from '../src/readers/scan.mjs';
+import { CONTAINER_FIXTURES } from './helpers/container-fixtures.mjs';
 import { READER_REGISTRY, capabilityBoundaryFor } from '../src/readers/index.mjs';
 import { SAMPLE_APP } from './helpers/cli.mjs';
 
@@ -770,7 +772,7 @@ function buildBeam(options = {}) {
 // 夹具集合
 // ---------------------------------------------------------------------------
 
-/** 八类格式的正常夹具，测试内按需取用。 */
+/** 九类格式的正常夹具，测试内按需取用。 */
 function buildNormalFixtures() {
   const symbols = buildSymbols(['main', 'helper_function', 'leaked_internal_name']);
   const elf = buildElf64([
@@ -888,7 +890,7 @@ test('令牌模式不匹配许可证样例文本', async () => {
 });
 
 test('令牌模式命中植入的测试令牌', () => {
-  // 样本一律运行时拼接：本仓库是反逆向工具，源码里不留凭证样式的字面量，
+  // 样本一律运行时拼接：本仓库是反逆向工具，源码里不留凭据样式的字面量，
   // 否则 GitHub 推送保护会按真密钥拦截，测试目的也不因此打折扣。
   const samples = [
     'AKIAIOSFODNN7EXAMPLE',
@@ -970,8 +972,156 @@ test('四个读取器的干净夹具不产生令牌发现', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 正常输入：八类格式各至少一条发现
+// 正常输入：九类格式各至少一条发现
 // ---------------------------------------------------------------------------
+
+/** DEX 夹具字节，与 tests/helpers/container-fixtures.mjs 的登记项同一份。 */
+const DEX_BYTES = CONTAINER_FIXTURES.find((fixture) => fixture.relativePath === 'dex/basic.dex').bytes;
+
+test('DEX 夹具：头部、类型描述符、方法名、字符串常量与令牌都被提取', async () => {
+  // 实测背景：独立 .dex 文件原先落入通用脚本包边界，一条事实都提不出来。
+  // 而类型描述符与方法名正是这类制品暴露面最大的部分——反编译产物里的
+  // 类名、方法名、字符串常量全部来自这几张表。
+  const entry = await writeFixture('basic.dex', DEX_BYTES);
+  const result = await runReader(dexReader, entry);
+  const categories = result.findings.map((finding) => finding.category);
+  assert.ok(categories.includes('dex-header'), '缺少 DEX 头部事实');
+  assert.ok(categories.includes('dex-type-descriptors'), '缺少类型描述符事实');
+  assert.ok(categories.includes('dex-method-names'), '缺少方法名事实');
+  assert.ok(categories.includes('dex-string-constants'), '缺少字符串常量事实');
+  assert.ok(categories.includes('token-aws-access-key-id'), '缺少令牌事实');
+
+  const header = result.findings.find((finding) => finding.category === 'dex-header');
+  assert.equal(header.detail.version, '035.');
+  assert.equal(header.detail.endianTagOk, true, '字节序标记应判定为合法');
+  assert.equal(header.detail.headerSize, 112);
+  assert.ok(header.detail.tables.length >= 3, '至少登记字符串、类型、方法三张表');
+
+  // 类型描述符必须完整取出，不是从中间截断的片段。
+  const types = result.findings.find((finding) => finding.category === 'dex-type-descriptors');
+  assert.deepEqual(types.detail.sampleTypes, ['Lcom/example/MainActivity;', 'onCreate', 'Landroid/os/Bundle;']);
+  assert.equal(types.detail.declaredCount, 3);
+
+  const methods = result.findings.find((finding) => finding.category === 'dex-method-names');
+  assert.deepEqual(methods.detail.sampleMethods, ['onCreate', 'svc-9f3a7b2e1d4c']);
+  assert.equal(methods.detail.declaredCount, 2);
+
+  const strings = result.findings.find((finding) => finding.category === 'dex-string-constants');
+  assert.equal(strings.detail.readableCount, 6, '六条字符串应全部可读');
+  assert.ok(strings.detail.sampleStrings.includes('https://api.example.com/v1'), '接口地址应出现在字符串常量里');
+
+  const token = result.findings.find((finding) => finding.category === 'token-aws-access-key-id');
+  assert.equal(token.layer, 'secret-minimization');
+  assert.equal(token.mitigation, 'secret.token-placeholder-overwrite');
+  assert.equal(token.detail.fileOffset, DEX_BYTES.indexOf(Buffer.from('AKIAIOSFODNN7EXAMPLE', 'latin1')));
+
+  // 自创格式的令牌不在任何公开格式家族内，扫描不到——这正是登记表声明的残留风险。
+  assert.ok(!categories.includes('token-credential-assignment'), '自创格式令牌不应被模式命中');
+  assert.equal(result.limitations.length, 0, `正常夹具不应产生限制说明：${JSON.stringify(result.limitations)}`);
+});
+
+test('DEX 令牌可等长覆写，且不破坏结构', async () => {
+  const entry = await writeFixture('basic.dex', DEX_BYTES);
+  const result = await runReader(dexReader, entry);
+  const finding = result.findings.find((item) => item.category === 'token-aws-access-key-id');
+  const applied = overwriteTokenPlaceholder(DEX_BYTES, finding, 'dex');
+  assert.equal(applied.ok, true, `DEX 令牌应可覆写：${applied.reason ?? ''}`);
+  assert.equal(applied.buffer.length, DEX_BYTES.length, '等长覆写保持字节数不变');
+  assert.equal(applied.buffer.includes('AKIAIOSFODNN7EXAMPLE'), false, '覆写后不得再含令牌明文');
+  // 覆写只清令牌字节，头部与三张索引表一个字节未动，复审仍应通过。
+  assert.equal(applied.buffer.subarray(0, 112).equals(DEX_BYTES.subarray(0, 112)), true, 'DEX 头部不得被改动');
+});
+
+test('DEX 头部不完整时登记限制说明，不返回空结果', async () => {
+  const entry = await writeFixture('short.dex', DEX_BYTES.subarray(0, 40));
+  const result = await runReader(dexReader, entry);
+  assert.ok(result.findings.some((finding) => finding.category === 'dex-magic'), '短文件仍应登记魔数与版本');
+  assert.ok(
+    result.limitations.some((limitation) => limitation.code === 'dex-header-truncated'),
+    '头部不完整必须留下限制说明，不能静默返回空结果',
+  );
+  assert.equal(result.findings.some((finding) => finding.category === 'dex-type-descriptors'), false, '头部不可读时不得凭空给出类型描述符');
+});
+
+test('DEX 表区间越界时登记限制说明，不按越界偏移读内容', async () => {
+  const tampered = Buffer.from(DEX_BYTES);
+  tampered.writeUInt32LE(9999, 60); // 把 string_ids 偏移改成越界值
+  const entry = await writeFixture('bad-offset.dex', tampered);
+  const result = await runReader(dexReader, entry);
+  assert.ok(
+    result.limitations.some((limitation) => limitation.code === 'dex-table-out-of-range'),
+    '表区间越界必须留下限制说明',
+  );
+  assert.equal(
+    result.findings.some((finding) => finding.category === 'dex-type-descriptors'),
+    false,
+    '字符串表越界时不得再给出类型描述符',
+  );
+  assert.ok(result.findings.some((finding) => finding.category === 'dex-header'), '头部声明本身照常登记');
+});
+
+test('DEX 字节序标记不符时登记限制说明，并说明结论可能不成立', async () => {
+  const tampered = Buffer.from(DEX_BYTES);
+  tampered.writeUInt32LE(0xdeadbeef, 40);
+  const entry = await writeFixture('bad-endian.dex', tampered);
+  const result = await runReader(dexReader, entry);
+  const note = result.limitations.find((limitation) => limitation.code === 'dex-endian-tag-mismatch');
+  assert.ok(note !== undefined, '字节序标记不符必须留下限制说明');
+  assert.match(note.message, /小端解释/, '必须说明后续字段按小端解释、结论可能不成立');
+  const header = result.findings.find((finding) => finding.category === 'dex-header');
+  assert.equal(header.detail.endianTagOk, false, '头部事实应记录字节序标记不合法');
+});
+
+test('APK 内的 classes.dex 被递归解析，类型与方法名进入报告', async () => {
+  // 实测背景：APK 此前只按普通 ZIP 处理，classes.dex 里的类名与方法名
+  // 完全看不见——而那正是 Android 应用暴露面最大的部分。现在递归进 DEX 读取器。
+  const dexBytes = CONTAINER_FIXTURES.find((fixture) => fixture.relativePath === 'dex/basic.dex').bytes;
+  const apk = buildZip([
+    { name: 'AndroidManifest.xml', method: 0, content: Buffer.from('manifest', 'latin1') },
+    { name: 'classes.dex', method: 0, content: dexBytes },
+    { name: 'classes2.dex', method: 8, content: dexBytes },
+  ]);
+  const entry = await writeFixture('app.apk', apk);
+  const result = await runReader(zipReader, entry);
+
+  const dexPaths = result.findings
+    .filter((finding) => finding.category === 'dex-type-descriptors')
+    .map((finding) => finding.evidence.path);
+  assert.deepEqual(dexPaths, ['app.apk!classes.dex', 'app.apk!classes2.dex'], '存储与 deflate 两类 DEX 条目都应递归解析');
+
+  // 类名必须真的出现在报告里，而不是只多出一条空发现。
+  const types = result.findings.find((finding) => finding.category === 'dex-type-descriptors');
+  assert.ok(types.detail.sampleTypes.includes('Lcom/example/MainActivity;'), 'APK 内的类名应可恢复');
+  assert.ok(
+    result.findings.some((finding) => finding.category === 'dex-method-names' && finding.detail.sampleMethods.length > 0),
+    'APK 内的方法名应可恢复',
+  );
+
+  // 递归说明必须留痕，且不得与“未跟进嵌套容器”自相矛盾。
+  const parsed = result.limitations.find((limitation) => limitation.code === 'zip-nested-dex-parsed');
+  assert.ok(parsed !== undefined, '递归解析 DEX 必须留下说明');
+  assert.ok(parsed.message.includes('classes.dex'), '说明应点名被解析的条目');
+  const unfollowed = result.limitations.find((limitation) => limitation.code === 'zip-nested-container-not-followed');
+  if (unfollowed !== undefined) {
+    assert.ok(!unfollowed.message.includes('classes.dex'), 'DEX 已解析，不得再报“未跟进”');
+  }
+});
+
+test('APK 内 DEX 条目数达到上限时登记限制说明，不静默丢弃', async () => {
+  const dexBytes = CONTAINER_FIXTURES.find((fixture) => fixture.relativePath === 'dex/basic.dex').bytes;
+  const entries = [{ name: 'AndroidManifest.xml', method: 0, content: Buffer.from('manifest', 'latin1') }];
+  for (let index = 1; index <= 10; index += 1) {
+    entries.push({ name: `classes${index}.dex`, method: 0, content: dexBytes });
+  }
+  const entry = await writeFixture('multidex.apk', buildZip(entries));
+  const result = await runReader(zipReader, entry);
+  const parsed = result.findings.filter((finding) => finding.category === 'dex-type-descriptors');
+  assert.equal(parsed.length, 8, '达到递归上限后只解析前 8 个 DEX 条目');
+  assert.ok(
+    result.limitations.some((limitation) => limitation.code === 'zip-nested-dex-entry-limit'),
+    '超出上限必须留下限制说明，不能静默丢弃',
+  );
+});
 
 test('ELF 夹具：节表、符号表、note、.dep-v0 与 Go 构建信息都被提取', async () => {
   const fixtures = buildNormalFixtures();
@@ -1414,7 +1564,7 @@ test('部分读取：ZIP 只读到条目数据时中央目录缺失被声明', a
 // 审计引擎集成：封闭词表、能力边界与脱敏
 // ---------------------------------------------------------------------------
 
-test('审计引擎：八类格式夹具全部产出发现，范围外格式给能力边界说明', async () => {
+test('审计引擎：九类格式夹具全部产出发现，范围外格式给能力边界说明', async () => {
   const fixtures = buildNormalFixtures();
   // 用独立子目录，避免前面测试写进临时目录的畸形夹具混进本次审计。
   const auditDir = await mkdtemp(join(workDir, 'audit-run-'));
@@ -1485,7 +1635,7 @@ test('读取器登记表：每个容器都有读取器，层标识全部在词�
   }
   assert.deepEqual(
     Object.keys(READER_REGISTRY).sort(),
-    ['beam', 'elf', 'gguf', 'mach-o', 'mach-o-fat', 'pe', 'pyc', 'safetensors', 'zip'],
+    ['beam', 'dex', 'elf', 'gguf', 'mach-o', 'mach-o-fat', 'pe', 'pyc', 'safetensors', 'zip'],
   );
 });
 

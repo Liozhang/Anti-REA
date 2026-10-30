@@ -7,7 +7,7 @@
 //      环境相关取值；同一份代码在任何机器、任何时刻运行都得到同一串字节。
 //   2. 不提交字节。产物只写进调用方给出的目录（测试里是系统临时目录），
 //      仓库里不留任何生成结果；需要核对时按 sha256 逐项比对。
-//   3. 复用既有构造器。八类格式的字节一律取自 tests/transforms/fixture-bytes.mjs
+//   3. 复用既有构造器。九类格式的字节一律取自 tests/transforms/fixture-bytes.mjs
 //      的确定性构造器，与单元测试跑的是同一套实现；只有仓库里还没有的格式
 //      （Java 类文件）才在本文件按同样风格新写，并说明它覆盖哪条路径。
 //
@@ -248,7 +248,7 @@ const BUNDLE_JS = `(function () {
 export const SAMPLE_PROJECT_FILES = Object.freeze([
   {
     relativePath: 'README.md',
-    covers: '普通 Markdown 条目：不落入八类格式，审计记能力边界',
+    covers: '普通 Markdown 条目：不落入九类格式，审计记能力边界',
     build: () => Buffer.from(README_TEXT, 'utf8'),
   },
   {

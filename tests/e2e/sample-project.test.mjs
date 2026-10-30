@@ -5,7 +5,7 @@
 //   畸形输入   notice 法律字段缺失走拒否；probe 子命令与 generate_probe_kit 工具按目标契约断言
 //   资源与边界 Java 类文件命中 CAFEBABE 魔数，识别阶段按分片表判为范围外容器并附歧义说明
 //
-// 每个用例都从 tests/e2e/build.mjs 重新生成一份项目写进临时目录，跑完即删：
+// 每个用例都从 tests/e2e/build.mjs 重新生成一份项目写进临时目录，运行结束即删：
 // 夹具不提交字节，也不让上一个用例的加固产物污染下一个用例的审计基线。
 // 进程内跑命令行（src/cli/index.mjs 的 runCli）为主，目录审计与两条 git 工作树用例
 // 另走真实子进程（tests/helpers/cli.mjs），确认入口脚本本身也走得通。
@@ -152,7 +152,7 @@ test('模拟项目按清单确定性生成，两次生成逐字节相同，且�
       '同一份构造器在任何时候都应产出同一串字节',
     );
 
-    // 覆盖面：任务要求的八类字节级制品加源码地图引用、说明文档、许可与普通文件都要在。
+    // 覆盖面：任务要求的字节级制品加源码地图引用、说明文档、许可与普通文件都要在。
     const paths = new Set(left.map((entry) => entry.relativePath));
     for (const required of [
       'bin/app-linux',
@@ -219,7 +219,7 @@ test('audit 目录目标：退出码 0，报告覆盖全部条目、容器分类
       assert.ok((containerCounts[type] ?? 0) >= 1, `报告里应出现容器 ${type}`);
     }
     // Java 类文件命中 CAFEBABE 但按分片表判为范围外容器，与七个普通文本条目一起计入 unsupported。
-    assert.equal(containerCounts.unsupported, 8, 'Java 类文件加七个普通文本条目都不落入八类格式');
+    assert.equal(containerCounts.unsupported, 8, 'Java 类文件加七个普通文本条目都不落入 v1 九类格式');
 
     assert.ok(report.findings.length > 0, '带 Go 构建信息、调试目录与模型元数据的项目应有发现');
     const evidencePaths = new Set(report.findings.map((finding) => finding.evidence.path));

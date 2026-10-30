@@ -534,6 +534,85 @@ export function buildMacho() {
 // ---------------------------------------------------------------------------
 
 /**
+ * 构造最小但结构合法的 DEX 夹具：头部加字符串、类型、方法三张索引表，再接字符串数据。
+ * @returns {Buffer}
+ */
+export function buildDex() {
+  const uleb = (value) => {
+    const bytes = [];
+    let rest = value;
+    do {
+      let byte = rest & 0x7f;
+      rest >>>= 7;
+      if (rest !== 0) {
+        byte |= 0x80;
+      }
+      bytes.push(byte);
+    } while (rest !== 0);
+    return Buffer.from(bytes);
+  };
+  const encodeString = (text) => {
+    const data = Buffer.from(text, 'latin1');
+    return Buffer.concat([uleb(data.length), data, Buffer.from([0])]);
+  };
+
+  const strings = ['Lcom/example/MainActivity;', 'onCreate', 'Landroid/os/Bundle;'];
+  const encoded = strings.map(encodeString);
+
+  // 布局：头部 112 | string_ids 3*4 | type_ids 3*4 | method_ids 2*8 | 字符串数据
+  const stringIdsOff = 112;
+  const typeIdsOff = stringIdsOff + strings.length * 4;
+  const methodIdsOff = typeIdsOff + 3 * 4;
+  const dataOff = methodIdsOff + 2 * 8;
+  const stringOffsets = [];
+  let cursor = dataOff;
+  for (const bytes of encoded) {
+    stringOffsets.push(cursor);
+    cursor += bytes.length;
+  }
+
+  const header = Buffer.alloc(112);
+  header.write('dex\n035\0', 0, 'latin1');
+  header.writeUInt32LE(0x11223344, 8);
+  header.writeUInt32LE(cursor, 32);
+  header.writeUInt32LE(112, 36);
+  header.writeUInt32LE(0x12345678, 40);
+  header.writeUInt32LE(strings.length, 56);
+  header.writeUInt32LE(stringIdsOff, 60);
+  header.writeUInt32LE(3, 64);
+  header.writeUInt32LE(typeIdsOff, 68);
+  header.writeUInt32LE(0, 72);
+  header.writeUInt32LE(0, 76);
+  header.writeUInt32LE(0, 80);
+  header.writeUInt32LE(0, 84);
+  header.writeUInt32LE(2, 88);
+  header.writeUInt32LE(methodIdsOff, 92);
+  header.writeUInt32LE(0, 96);
+  header.writeUInt32LE(0, 100);
+  header.writeUInt32LE(cursor - dataOff, 104);
+  header.writeUInt32LE(dataOff, 108);
+
+  const u32 = (value) => {
+    const buffer = Buffer.alloc(4);
+    buffer.writeUInt32LE(value, 0);
+    return buffer;
+  };
+  const u16 = (value) => {
+    const buffer = Buffer.alloc(2);
+    buffer.writeUInt16LE(value, 0);
+    return buffer;
+  };
+
+  return Buffer.concat([
+    header,
+    Buffer.concat(stringOffsets.map(u32)),
+    Buffer.concat([0, 1, 2].map(u32)),
+    Buffer.concat([1, 2].map((nameIndex) => Buffer.concat([u16(0), u16(0), u32(nameIndex)]))),
+    ...encoded,
+  ]);
+}
+
+/**
  * 构造 BEAM 夹具。
  * @returns {Buffer}
  */
@@ -721,6 +800,7 @@ export function buildFixtures() {
     pyc: buildPyc(),
     'pyc-hash-cleared': buildPyc({ clearSourceHash: true }),
     beam: buildBeam(),
+    dex: buildDex(),
   };
 }
 

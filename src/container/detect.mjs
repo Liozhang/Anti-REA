@@ -9,7 +9,7 @@
 // 结构魔数的关键字节可能落在标准窗口之外，由 detectionProbeLength 指出需要补读多少字节，
 // 读取动作在 identify.mjs 完成，本模块只给出格式知识。
 
-/** 识别时读取的标准文件头长度。八类格式的魔数都在前 4096 字节内可判定。 */
+/** 识别时读取的标准文件头长度。九类格式的魔数都在前 4096 字节内可判定。 */
 export const DETECTION_PREFIX_BYTES = 4096;
 
 /** safetensors 头部长度声明的补读上限。超过此值的声明不触发补读，也不按 safetensors 处理。 */
@@ -45,8 +45,14 @@ const PE_UNDETERMINED_NOTE = 'MZ 魔数命中，但已读窗口不足以确认 P
 /** 命中 FOR1 但窗口不足以确认 BEAM 标记时的未判定说明。 */
 const BEAM_UNDETERMINED_NOTE = 'FOR1 魔数命中，但已读窗口不足以确认 BEAM 标记，无法确认或排除';
 
+/** 命中 dex\n 但窗口不足以确认版本号时的未判定说明。 */
+const DEX_UNDETERMINED_NOTE = 'dex\\n 魔数命中，但已读窗口不足以确认版本号，无法确认或排除';
+
+/** 命中 dex\n 但版本号不是三位数字加终止零时的归类说明。 */
+const DEX_VERSION_NOTE = 'dex\\n 之后不是三位版本号加一个零字节，判为范围外容器';
+
 /**
- * 八类 v1 格式的魔数表。顺序即判定优先级。
+ * 九类 v1 格式的魔数表。顺序即判定优先级。
  * 每项字段：
  *   type      容器标识，供读取器注册表与报告使用
  *   label     人读格式名
@@ -69,9 +75,12 @@ const CONTAINER_TABLE = [
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x07, 0x08], offset: 0 },
   { type: 'gguf', label: 'GGUF', magic: [0x47, 0x47, 0x55, 0x46], offset: 0 },
   { type: 'beam', label: 'BEAM', magic: [0x46, 0x4f, 0x52, 0x31], offset: 0, confirm: 'confirmBeam' },
+  // DEX 魔数共八字节：'dex' 加换行，随后三位版本号数字，最后一个是零字节。
+  // 版本号从 035 到 039，未来版本继续递增，因此只校验形态而不校验具体值。
+  { type: 'dex', label: 'DEX', magic: [0x64, 0x65, 0x78, 0x0a], offset: 0, confirm: 'confirmDex' },
 ];
 
-/** v1 支持的八类格式容器标识，封闭集合。 */
+/** v1 支持的九类格式容器标识，封闭集合。 */
 export const SUPPORTED_CONTAINERS = Object.freeze([
   'elf',
   'pe',
@@ -82,6 +91,7 @@ export const SUPPORTED_CONTAINERS = Object.freeze([
   'safetensors',
   'pyc',
   'beam',
+  'dex',
 ]);
 
 /**
@@ -118,6 +128,23 @@ function confirmBeam(prefix) {
     return 'undetermined';
   }
   return prefix.toString('latin1', 8, 12) === 'BEAM' ? 'confirmed' : 'refuted';
+}
+
+/**
+ * 确认 DEX：'dex' 加换行之后是三位 ASCII 数字版本号，最后一个字节是零。
+ * 返回三态，含义同 confirmPe。
+ * @param {Buffer} prefix 文件头字节
+ * @returns {'confirmed' | 'refuted' | 'undetermined'}
+ */
+function confirmDex(prefix) {
+  if (prefix.length < 8) {
+    return 'undetermined';
+  }
+  const digit = (byte) => byte >= 0x30 && byte <= 0x39;
+  if (digit(prefix[4]) && digit(prefix[5]) && digit(prefix[6]) && prefix[7] === 0x00) {
+    return 'confirmed';
+  }
+  return 'refuted';
 }
 
 /**
@@ -337,6 +364,17 @@ export function detectContainer(prefix, fileSize) {
         return { type: 'unknown', label: '未判定', note: BEAM_UNDETERMINED_NOTE };
       }
     }
+    if (entry.confirm === 'confirmDex') {
+      const verdict = confirmDex(prefix);
+      if (verdict === 'refuted') {
+        // dex\n 只是四个字节，文本文件与别的容器都可能以它开头。
+        // 版本号形态不符时按范围外容器归类，不送进 DEX 读取器。
+        return { type: 'unsupported', label: '范围外容器', note: DEX_VERSION_NOTE };
+      }
+      if (verdict === 'undetermined') {
+        return { type: 'unknown', label: '未判定', note: DEX_UNDETERMINED_NOTE };
+      }
+    }
     if (entry.confirm === 'confirmFat') {
       const verdict = confirmFat(prefix, size);
       if (verdict === 'refuted') {
@@ -361,7 +399,7 @@ export function detectContainer(prefix, fileSize) {
   if (detectPyc(prefix)) {
     return { type: 'pyc', label: 'pyc', note: '字节 2 至 3 为 0D 0A，符合 pyc 魔数之后的固定标记' };
   }
-  return { type: 'unsupported', label: '范围外容器', note: '文件头不匹配 v1 八类格式中的任何一类' };
+  return { type: 'unsupported', label: '范围外容器', note: '文件头不匹配 v1 九类格式中的任何一类' };
 }
 
 /**

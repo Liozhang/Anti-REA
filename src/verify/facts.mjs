@@ -1078,6 +1078,64 @@ function inspectBeam(bytes) {
 }
 
 // ---------------------------------------------------------------------------
+// DEX：头部、字节序标记与三张索引表
+// ---------------------------------------------------------------------------
+
+/** DEX 头部固定长度。 */
+const DEX_HEADER_BYTES = 112;
+
+/** DEX 字节序标记的合法值。 */
+const DEX_ENDIAN_TAG = 0x12345678;
+
+/**
+ * 检查 DEX 结构事实。
+ * 判据与 required-sets 的 requirement 对应：头部可读、字节序标记正确、
+ * 字符串、类型、方法三张索引表的区间落在文件内且计数自洽。
+ * @param {Buffer} bytes 制品字节
+ * @returns {Record<string, unknown>}
+ */
+function inspectDex(bytes) {
+  const facts = {};
+  const structures = [];
+  if (bytes.length < 8 || bytes.toString('latin1', 0, 4) !== 'dex\n') {
+    facts['dex.header'] = broken('缺少 dex 加换行的魔数');
+    return envelope('dex', { parseable: false, reason: '缺少 DEX 魔数', structures }, facts);
+  }
+  if (bytes.length < DEX_HEADER_BYTES) {
+    facts['dex.header'] = broken(`文件仅 ${bytes.length} 字节，不足 DEX 头部固定的 ${DEX_HEADER_BYTES} 字节`);
+    return envelope('dex', { parseable: false, reason: 'DEX 头部不完整', structures }, facts);
+  }
+  facts['dex.header'] = ok('魔数、版本与各表偏移计数均可读');
+  const endianTag = readUInt(bytes, 40, 4, false);
+  facts['dex.endian-tag'] = endianTag === DEX_ENDIAN_TAG ? ok(`字节序标记 0x${endianTag.toString(16)}`) : broken(`字节序标记为 0x${(endianTag ?? 0).toString(16)}，不是 0x${DEX_ENDIAN_TAG.toString(16)}`);
+
+  // 三张索引表的区间检查：任一张越界即判失败，因为它的条目根本读不到。
+  const tables = [
+    { id: 'dex.string-ids', label: '字符串索引表', sizeField: 56, offField: 60, itemBytes: 4 },
+    { id: 'dex.type-ids', label: '类型索引表', sizeField: 64, offField: 68, itemBytes: 4 },
+    { id: 'dex.method-ids', label: '方法索引表', sizeField: 88, offField: 92, itemBytes: 8 },
+  ];
+  for (const table of tables) {
+    const size = readUInt(bytes, table.sizeField, 4, false);
+    const off = readUInt(bytes, table.offField, 4, false);
+    if (size === undefined || off === undefined) {
+      facts[table.id] = broken(`${table.label}的大小或偏移字段读取越界`);
+      continue;
+    }
+    if (size === 0) {
+      // 空表按不适用：制品可以合法地不含类型或方法，但不能含越界的表。
+      facts[table.id] = absent(`${table.label}声明 0 项`);
+      continue;
+    }
+    const end = off + size * table.itemBytes;
+    facts[table.id] = end <= bytes.length ? ok(`${table.label}声明 ${size} 项，区间 [${off}, ${end}) 落在文件内`) : broken(`${table.label}声明 ${size} 项，区间终点 ${end} 超出文件长度 ${bytes.length}`);
+  }
+
+  const parseable = Object.values(facts).every((fact) => fact.parsed !== false);
+  return envelope('dex', parseable ? { parseable: true, structures } : { parseable: false, reason: firstFailure(facts) ?? 'DEX 结构解析失败', structures }, facts);
+}
+
+// ---------------------------------------------------------------------------
 // 分派
 // ---------------------------------------------------------------------------
 
@@ -1092,6 +1150,7 @@ const INSPECTORS = Object.freeze({
   safetensors: inspectSafetensors,
   pyc: inspectPyc,
   beam: inspectBeam,
+  dex: inspectDex,
 });
 
 /**

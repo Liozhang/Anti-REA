@@ -6,6 +6,7 @@ import { inflateRawSync } from 'node:zlib';
 
 import { createFinding } from '../audit/finding.mjs';
 import { defineReader, findAll, limitation, readEntryBytes, readUIntLE, sanitizeExcerpt, truncationLimitation } from './common.mjs';
+import { parseDex } from './dex.mjs';
 import { scanTokens, tokenFindings, tokenScanLimitation } from './scan.mjs';
 
 /** ZIP 签名。 */
@@ -31,7 +32,20 @@ const NESTED_MAGICS = Object.freeze([
   { type: 'pe', magic: Buffer.from('MZ', 'latin1') },
   { type: 'mach-o', magic: Buffer.from('\xcf\xfa\xed\xfe', 'latin1') },
   { type: 'gguf', magic: Buffer.from('GGUF', 'latin1') },
+  // DEX 只认前四个字节 dex\n，版本号由 DEX 读取器自己校验；
+  // 这里先按四字节命中，认不出来的交给读取器转成限制说明。
+  { type: 'dex', magic: Buffer.from('dex\n', 'latin1') },
 ]);
+
+/**
+ * 单个 ZIP 内最多递归解析的 DEX 条目数。
+ * 多 dex 应用的 classes2.dex、classes3.dex 通常只有个位数，
+ * 上限用来防住刻意构造的条目堆叠把审计拖住。
+ */
+const NESTED_DEX_ENTRY_LIMIT = 8;
+
+/** 单个 ZIP 内递归解析 DEX 的累计字节上限，防止解压后总体积失控。 */
+const NESTED_DEX_BYTES_LIMIT = 32 * 1024 * 1024;
 
 /** CRC32 查找表，多项式 0xEDB88320 的反射形式。 */
 const CRC32_TABLE = (() => {
@@ -226,6 +240,9 @@ async function readZip(context) {
 
   const entryReports = [];
   const nestedContainers = [];
+  // DEX 条目的内容缓存：APK 的 classes.dex 要交给 DEX 读取器解析，
+  // 但存储条目与 deflate 条目拿到内容的时机不同，先收集再统一处理。
+  const dexCandidates = [];
   let scannedEntryCount = 0;
   let rawOnlyCount = 0;
   // 已按条目原始字节报告过的令牌命中，键为“模式标识加文件偏移”，避免整文件扫描重复报告同一次命中。
@@ -271,6 +288,9 @@ async function readZip(context) {
         );
       }
       report.nestedContainer = nestedContainerOf(local.raw);
+      if (report.nestedContainer === 'dex') {
+        dexCandidates.push({ name: zipEntry.name, content: local.raw, compressed: false });
+      }
       const scan = scanTokens(local.raw);
       for (const hit of scan.hits) {
         reportedRawHits.add(`${hit.id}:${local.localHeader.dataStart + hit.offset}`);
@@ -306,6 +326,9 @@ async function readZip(context) {
         report.crc32Computed = crc;
         report.crcMatch = crc === zipEntry.crc32;
         report.nestedContainer = nestedContainerOf(inflated);
+        if (report.nestedContainer === 'dex') {
+          dexCandidates.push({ name: zipEntry.name, content: inflated, compressed: true });
+        }
         scannedEntryCount += 1;
         if (!report.crcMatch) {
           limitations.push(
@@ -352,11 +375,61 @@ async function readZip(context) {
     entryReports.push(report);
   }
 
-  if (nestedContainers.length > 0) {
+  // DEX 条目单独递归解析，其余嵌套容器仍不跟进：只做 DEX 是因为
+  // APK 的 classes.dex 是最常见也最暴露的嵌套层，其余容器没有同等的现实需求。
+  const dexFindings = [];
+  const dexLimitations = [];
+  const dexNames = [];
+  let dexBytes = 0;
+  for (const candidate of dexCandidates) {
+    if (dexNames.length >= NESTED_DEX_ENTRY_LIMIT) {
+      dexLimitations.push(
+        limitation(
+          'zip-nested-dex-entry-limit',
+          `DEX 条目数达到递归上限 ${NESTED_DEX_ENTRY_LIMIT}，条目 ${candidate.name} 及其后的 DEX 条目本次没有解析；这些条目不等于没有暴露，只是本次没有提取到事实`,
+        ),
+      );
+      break;
+    }
+    if (dexBytes + candidate.content.length > NESTED_DEX_BYTES_LIMIT) {
+      dexLimitations.push(
+        limitation(
+          'zip-nested-dex-bytes-limit',
+          `DEX 条目累计字节数达到上限 ${NESTED_DEX_BYTES_LIMIT}，条目 ${candidate.name} 及其后的 DEX 条目本次没有解析；这些条目不等于没有暴露，只是本次没有提取到事实`,
+        ),
+      );
+      break;
+    }
+    dexBytes += candidate.content.length;
+    dexNames.push(candidate.name);
+    // 证据路径用“外层条目!内层条目”，让报告能指到 APK 内的具体 classes.dex。
+    const nested = parseDex(candidate.content, `${path}!${candidate.name}`);
+    dexFindings.push(...nested.findings);
+    for (const note of nested.limitations) {
+      dexLimitations.push({
+        ...note,
+        message: `条目 ${candidate.name}：${note.message}`,
+      });
+    }
+  }
+  findings.push(...dexFindings);
+  limitations.push(...dexLimitations);
+
+  // 未递归的嵌套容器排除 DEX：DEX 已经解析，再报一条“没有跟进”会自相矛盾。
+  const unfollowed = nestedContainers.filter((nested) => nested.container !== 'dex');
+  if (unfollowed.length > 0) {
     limitations.push(
       limitation(
         'zip-nested-container-not-followed',
-        `条目 ${nestedContainers.map((nested) => `${nested.name}（${nested.container}）`).join('、')} 的内容本身是容器；v1 不递归解包嵌套容器，嵌套层内的事实本次没有覆盖`,
+        `条目 ${unfollowed.map((nested) => `${nested.name}（${nested.container}）`).join('、')} 的内容本身是容器；v1 只递归解析 DEX 一类，其余嵌套层内的事实本次没有覆盖`,
+      ),
+    );
+  }
+  if (dexNames.length > 0) {
+    limitations.push(
+      limitation(
+        'zip-nested-dex-parsed',
+        `条目 ${dexNames.join('、')} 识别为 DEX，已按 DEX 读取器解析类型描述符、方法名与字符串常量；DEX 内的指令流与方法体不在解析范围内`,
       ),
     );
   }

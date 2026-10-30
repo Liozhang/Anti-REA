@@ -45,7 +45,7 @@ test('脱敏函数隐去证据路径、字节范围与缓解措施对应关系',
         mitigation: 'metadata.go-buildinfo-inline-overwrite',
       },
     ],
-    capabilityBoundaries: [{ id: 'generic-script-package', label: '范围外容器', reason: '不匹配八类格式', count: 3 }],
+    capabilityBoundaries: [{ id: 'generic-script-package', label: '范围外容器', reason: '不匹配九类格式', count: 3 }],
     limitations: [],
     summary: { findings: 1, byLayer: { 'metadata-hygiene': 1 }, bySeverity: { high: 1 } },
   };

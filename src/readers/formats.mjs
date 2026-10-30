@@ -1,9 +1,10 @@
-// v1 八类格式的读取器登记。
+// v1 九类格式的读取器登记。
 // 读取器只读：只检查字节，不加载、不执行制品内代码。
 // 每条发现都带证据、会消费它的读取器、读取器自身声明的限制，以及建议的缓解措施编号；
 // 畸形输入与部分读取都转成限制说明，而不是让审计失败，更不是返回空结果冒充“没有暴露”。
 
 import { beamReader } from './beam.mjs';
+import { dexReader } from './dex.mjs';
 import { elfReader } from './elf.mjs';
 import { ggufReader } from './gguf.mjs';
 import { machoReader } from './macho.mjs';
@@ -12,8 +13,8 @@ import { pycReader } from './pyc.mjs';
 import { safetensorsReader } from './safetensors.mjs';
 import { zipReader } from './zip.mjs';
 
-/** v1 八类格式读取器。 */
-export const FORMAT_READERS = Object.freeze([elfReader, peReader, machoReader, zipReader, ggufReader, safetensorsReader, pycReader, beamReader]);
+/** v1 九类格式读取器。 */
+export const FORMAT_READERS = Object.freeze([elfReader, peReader, machoReader, zipReader, ggufReader, safetensorsReader, pycReader, beamReader, dexReader]);
 
 /**
  * 范围外格式的能力边界表。
@@ -48,7 +49,7 @@ export const CAPABILITY_BOUNDARIES = Object.freeze([
   {
     id: 'generic-script-package',
     label: '通用脚本包',
-    reason: 'v1 按容器魔数判定，纯文本、配置与通用脚本包不落入八类格式中的任何一类',
+    reason: 'v1 按容器魔数判定，纯文本、配置与通用脚本包不落入九类格式中的任何一类',
     hint: '把制品打成受支持的容器格式后再审计；文本类暴露面需专用读取器',
   },
   {

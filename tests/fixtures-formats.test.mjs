@@ -1,6 +1,6 @@
 // fixtures 模块测试：字节级夹具的真实性、格式覆盖、畸形输入与部分读取。
 // 覆盖三条路径：
-//   正常输入   八类格式夹具各被识别为对应容器，真实读取器从夹具里取出预期事实
+//   正常输入   九类格式夹具各被识别为对应容器，真实读取器从夹具里取出预期事实
 //   畸形输入   截断的 ELF、损坏结尾记录的 ZIP、越界的 safetensors 索引、被破坏 pyc 标记的制品
 //   部分读取   单文件上限与累计扫描窗口触发的部分结果与限制说明
 // 夹具说明：全部用例跑 tests/fixtures/ 下已提交且摘要登记在 manifest.json 的固定字节；
@@ -27,7 +27,7 @@ import { BYTE_FIXTURES, buildFixtureBytes } from './fixtures/build.mjs';
 
 const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
-/** v1 八类格式的容器标识，封闭集合。 */
+/** v1 九类格式的容器标识，封闭集合。 */
 const SUPPORTED = Object.freeze(['elf', 'pe', 'mach-o', 'zip', 'gguf', 'safetensors', 'pyc', 'beam']);
 
 /** 临时目录在测试结束后清理。 */
@@ -107,7 +107,7 @@ function limitationCodes(report) {
 // 正常输入：容器识别与格式覆盖
 // ---------------------------------------------------------------------------
 
-test('v1 八类格式的夹具各至少一个，且都被识别为对应容器', () => {
+test('v1 九类格式的夹具各至少一个，且都被识别为对应容器', () => {
   for (const container of SUPPORTED) {
     const fixtures = BYTE_FIXTURES.filter((fixture) => fixture.container === container);
     assert.ok(fixtures.length >= 1, `${container} 没有夹具`);

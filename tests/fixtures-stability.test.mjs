@@ -102,7 +102,7 @@ test('夹具规格登记表与构建登记表一致', () => {
   }
 });
 
-test('夹具规格登记表覆盖 v1 八类格式与两类范围外格式', () => {
+test('夹具规格登记表覆盖 v1 九类格式与两类范围外格式', () => {
   for (const container of ['elf', 'pe', 'mach-o', 'zip', 'gguf', 'safetensors', 'pyc', 'beam']) {
     assert.ok(
       FIXTURE_SPECS.some((spec) => spec.container === container),

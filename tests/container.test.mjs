@@ -1,6 +1,6 @@
 // container 模块测试：只读容器识别与镜像解析。
 // 覆盖三类输入：
-//   正常输入   八类格式各至少一个真实字节夹具，经内存判定与磁盘读取两条路径
+//   正常输入   九类格式各至少一个真实字节夹具，经内存判定与磁盘读取两条路径
 //   畸形输入   空文件、不足四字节、随机字节、确认失败、坏 JSON、范围外格式
 //   部分读取   单文件上限、累计扫描窗口、条目数上限、结构魔数补读与被截断
 // 夹具由 tests/helpers/container-fixtures.mjs 确定性生成，本文件把 sha256 与登记值比对，
@@ -46,6 +46,7 @@ const PINNED_DIGESTS = Object.freeze({
   'pyc/hash-based.pyc': '217abb3906189eb8837d784e79e409d15ec9e69679f374f9366a312693648f36',
   'pyc/timestamp-based.pyc': 'faa7f2b2500e182558b4e53df8bd214a02a534bb13d93d32d700ff482ee7b174',
   'beam/basic.beam': 'dc7f52d4f3ff2b2e76884dbe2083ab3d367fca9f2af9b7aa8b12e4db8bbcfbe9',
+  'dex/basic.dex': 'bfa85d917f9d502c09c24b311206f015f106f343ffe33c1110a1e05ae6b5e1d3',
   'malformed/empty.bin': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   'malformed/tiny.bin': '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
   'malformed/random.bin': '4e42bf2050186cbe1171225cc122203eff53f8d8d5c5badca05dd1d7b16863f3',
@@ -60,7 +61,7 @@ const PINNED_DIGESTS = Object.freeze({
   'unsupported/java-class.class': 'e38a171505dfe57169c6afdc13976595e6d6ea115591b808b6e0339319a8c1f6',
 });
 
-/** v1 八类格式，每类至少一个夹具。 */
+/** v1 九类格式，每类至少一个夹具。 */
 const EIGHT_FORMATS = Object.freeze(['elf', 'pe', 'mach-o', 'zip', 'gguf', 'safetensors', 'pyc', 'beam']);
 
 const fixturesRoot = await mkdtemp(join(tmpdir(), 'anti-rea-container-'));
@@ -87,7 +88,7 @@ function fixturePath(relativePath) {
   return join(fixturesRoot, ...relativePath.split('/'));
 }
 
-test('夹具登记表覆盖 v1 八类格式与范围外格式', () => {
+test('夹具登记表覆盖 v1 九类格式与范围外格式', () => {
   for (const container of [...EIGHT_FORMATS, 'mach-o-fat']) {
     assert.ok(
       CONTAINER_FIXTURES.some((fixture) => fixture.expected.type === container),
@@ -110,7 +111,7 @@ test('每个夹具的 sha256 与登记值一致，保证测试跑的是固定真
   }
 });
 
-test('受支持容器集合是八类格式的封闭集合，胖二进制单列', () => {
+test('受支持容器集合是九类格式的封闭集合，胖二进制单列', () => {
   assert.equal(DETECTION_PREFIX_BYTES, 4096);
   assert.equal(SAFETENSORS_HEADER_PROBE_MAX, 8 * 1024 * 1024);
   for (const container of EIGHT_FORMATS) {
@@ -123,7 +124,7 @@ test('受支持容器集合是八类格式的封闭集合，胖二进制单列',
   assert.equal(isSupportedContainer('elf'), true);
 });
 
-test('八类格式夹具在内存中按魔数判定为登记的类型', () => {
+test('九类格式夹具在内存中按魔数判定为登记的类型', () => {
   for (const fixture of CONTAINER_FIXTURES) {
     const result = detectContainer(fixture.bytes, fixture.bytes.length);
     assert.equal(result.type, fixture.expected.type, `判定结果与登记不符：${fixture.relativePath}`);
@@ -467,7 +468,7 @@ test('部分读取：目录条目数达到上限时截断并保留已枚举条�
   assert.equal(identity.truncated, true);
   assert.deepEqual(
     identity.entries.map((entry) => entry.relativePath),
-    ['beam/basic.beam', 'elf/basic.elf', 'elf/header-only.elf'],
+    ['beam/basic.beam', 'dex/basic.dex', 'elf/basic.elf'],
   );
 });
 

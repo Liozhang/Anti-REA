@@ -46,6 +46,7 @@ const RECORDED_DIGESTS = Object.freeze({
   pyc: 'e1d2aebb2fe4f47690d9caede62820110faa7a7cc381ea072c256dab2d996496',
   'pyc-hash-cleared': '1f43b7318c005cd8f5a827a4122903f5b0207ed05802779f6ffd3b59ed529b55',
   beam: '66a218952269cec33a95e05a3fcd39b68adde70d807cb4a77b3d6e0a08dca9a3',
+  dex: 'df82eaabea5faca4052b789cea5adb712591c0f85f807ce878feaa758ac566c6',
 });
 
 /** 容器标识到夹具键的映射，每类格式至少一个真实字节夹具。 */
@@ -58,6 +59,7 @@ const CONTAINER_FIXTURES = Object.freeze({
   safetensors: 'safetensors',
   pyc: 'pyc',
   beam: 'beam',
+  dex: 'dex',
 });
 
 // ---------------------------------------------------------------------------
@@ -288,7 +290,7 @@ test('程序头被破坏的 ELF 判 failed，且只归因到程序头表', () =>
   assert.ok(result.items.every((item) => item.id !== 'elf.program-headers' || item.status === 'failed'));
 });
 
-test('v1 八类格式的夹具各自全部必需项可解析', () => {
+test('v1 九类格式的夹具各自全部必需项可解析', () => {
   for (const [container, fixtureKey] of Object.entries(CONTAINER_FIXTURES)) {
     const facts = extractFacts(container, fixtures[fixtureKey]);
     const result = checkRequiredSet(container, facts, []);

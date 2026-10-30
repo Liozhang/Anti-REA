@@ -306,7 +306,7 @@ test('审计已提交的 sample-app 夹具目录正常完成，两次审计摘�
   assert.deepEqual(
     first.containers,
     [{ type: 'unsupported', count: 7 }],
-    '夹具内七个文件都不落入 v1 八类格式',
+    '夹具内七个文件都不落入 v1 九类格式',
   );
   assert.equal(first.capabilityBoundaries.length, 1);
   assert.equal(first.capabilityBoundaries[0].count, 7);
@@ -563,7 +563,7 @@ test('伪魔数与坏 safetensors 头被判为范围外容器，报告能力边�
     try {
       const report = await auditArtifact(artifact.path);
       assert.equal(report.status, 'complete', `${testCase.name} 不应让审计失败`);
-      assert.equal(report.artifact.container, 'unsupported', `${testCase.name} 不应落入 v1 八类格式`);
+      assert.equal(report.artifact.container, 'unsupported', `${testCase.name} 不应落入 v1 九类格式`);
       assert.equal(report.capabilityBoundaries.length, 1);
       assert.ok(report.capabilityBoundaries[0].reason.includes('unsupported'), '能力边界要说明识别结果');
       assert.deepEqual(report.findings, []);

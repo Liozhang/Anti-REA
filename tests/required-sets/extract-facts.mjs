@@ -576,6 +576,42 @@ function extractBeamFacts(buffer) {
   return facts;
 }
 
+/** DEX 头部固定长度。 */
+const DEX_HEADER_BYTES = 112;
+
+/** DEX 字节序标记的合法值。 */
+const DEX_ENDIAN_TAG = 0x12345678;
+
+/**
+ * 提取 DEX 结构事实。
+ * 判据与 src/required-sets/sets.mjs 的 dex 必需项一一对应：
+ * 头部可读、字节序标记正确、字符串、类型、方法三张索引表区间落在文件内。
+ * @param {Buffer} buffer 制品字节
+ * @returns {Record<string, unknown>}
+ */
+function extractDexFacts(buffer) {
+  const facts = {};
+  if (buffer.length < DEX_HEADER_BYTES) {
+    facts['dex.header'] = { parsed: false, reason: `文件不足 ${DEX_HEADER_BYTES} 字节，DEX 头部不完整` };
+    return facts;
+  }
+  facts['dex.header'] = { parsed: buffer.toString('latin1', 0, 4) === 'dex\n', reason: 'DEX 魔数与头部可读' };
+  const endianTag = buffer.readUInt32LE(40);
+  facts['dex.endian-tag'] = { parsed: endianTag === DEX_ENDIAN_TAG, reason: `字节序标记 0x${endianTag.toString(16)}` };
+  const tables = [
+    { id: 'dex.string-ids', sizeField: 56, offField: 60, itemBytes: 4 },
+    { id: 'dex.type-ids', sizeField: 64, offField: 68, itemBytes: 4 },
+    { id: 'dex.method-ids', sizeField: 88, offField: 92, itemBytes: 8 },
+  ];
+  for (const table of tables) {
+    const size = buffer.readUInt32LE(table.sizeField);
+    const off = buffer.readUInt32LE(table.offField);
+    const end = off + size * table.itemBytes;
+    facts[table.id] = { parsed: end <= buffer.length, reason: `${size} 项位于偏移 ${off}，区间终点 ${end}，文件长 ${buffer.length}` };
+  }
+  return facts;
+}
+
 /** 容器标识到提取函数的映射。 */
 const EXTRACTORS = {
   elf: extractElfFacts,
@@ -586,6 +622,7 @@ const EXTRACTORS = {
   safetensors: extractSafetensorsFacts,
   pyc: extractPycFacts,
   beam: extractBeamFacts,
+  dex: extractDexFacts,
 };
 
 /**
