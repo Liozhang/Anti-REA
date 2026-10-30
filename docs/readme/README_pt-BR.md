@@ -57,7 +57,10 @@ Três comandos são executados em ordem, e a ordem importa:
    `.hardened` ao lado do original. Cada mitigação é uma sobrescrita de comprimento igual ou uma
    escrita com reorganização de layout, de modo que o comprimento do arquivo e os deslocamentos
    permanecem válidos. Qualquer coisa que alteraria o comportamento em tempo de execução é
-   reportada como ignorada com o seu motivo, nunca tentada em silêncio.
+   reportada como ignorada com o seu motivo, nunca tentada em silêncio. Cada entrada no
+   resultado, aplicada ou ignorada, também declara o que a mitigação ainda deixa exposto e a
+   correção em tempo de compilação que remove a exposição por completo — uma medida aplicada
+   nunca é reportada como completa.
 3. **`verify`** relê a cópia endurecida e verifica as estruturas das quais os seus usuários ainda
    dependem. Os conjuntos obrigatórios são derivados das mitigações aplicadas: o que uma mitigação
    declara tocar fica isento, todo o resto precisa continuar analisável. Uma execução de
@@ -108,14 +111,25 @@ artefato. O mesmo pacote fica disponível para os agentes como a ferramenta `gen
 | Cabeçalhos, seções, símbolos e build IDs de ELF/PE/Mach-O | Leitores estáticos embutidos, objdump | Todo fato que um leitor consegue extrair, com o seu trecho de origem |
 | Metadados de módulo e build do Go embutidos | Leitor de Go embutido | Presença, versões e a seção que os carrega |
 | Metadados de dependências Rust embutidos (`.dep-v0`) | Leitor de Rust embutido | Nomes dos crates, versões e arestas de dependência |
-| Metadados do Unity IL2CPP | Leitor de IL2CPP embutido | Nomes de tipos e métodos recuperáveis |
-| Metadados e CIL do .NET | Leitor de código gerenciado embutido | Fatos do assembly e inventário de membros |
-| Source maps e grafos de módulos JavaScript | Leitor de JavaScript embutido | Fontes originais recuperáveis |
+| Descritores de tipo, nomes de método e constantes de string do Android DEX | Leitor de DEX embutido | Nomes de classe, nomes de método e o pool de constantes |
 | Certificados, importações, exportações e configuração de carregamento de PE | Leitores de PE embutidos | Identidade do signatário e importações declaradas |
-| Metadados de contêineres de modelo, SQLite, Erlang, pyc e outros | Leitores de formato embutidos | Metadados declarados e totais |
+| Metadados de contêineres de modelo, Erlang, pyc e outros | Leitores de formato embutidos | Metadados declarados e totais |
 | Credenciais embutidas | Scanner de padrões de tokens | Famílias de credenciais conhecidas com formatos públicos, com deslocamento |
 
-Cada descoberta carrega a sua evidência, o leitor que a consumiria e a mitigação que a remove.
+Formatos fora do conjunto de leitores são reportados, não ignorados. Quando a auditoria encontra
+um `global-metadata.dat` do Unity IL2CPP, um assembly .NET, um bundle JavaScript, um bloco de
+assinatura de APK ou um contêiner de cargas de GPU, ela nomeia o formato como um limite de
+capacidade, com o motivo pelo qual ele está fora de escopo e o seu próximo passo, em vez de
+retornar um resultado vazio. Um resultado vazio não é prova de segurança. Um APK é lido
+como um ZIP e depois seguido um nível mais fundo. Cada entrada `classes.dex`, tanto
+armazenada quanto descomprimida, é entregue ao leitor de DEX, de modo que os nomes de
+classe, nomes de método e constantes de string do app chegam ao relatório sob um caminho
+`app.apk!classes.dex`. O bloco de assinatura é reportado como um limite de capacidade em
+vez de analisado.
+
+Cada descoberta carrega a sua evidência, o leitor que a consumiria, a mitigação que a removeria, o
+que essa mitigação ainda deixa exposto e a correção em tempo de compilação que remove a exposição
+por completo.
 
 ## Resultados medidos
 
@@ -128,7 +142,7 @@ depois relidos com os leitores estáticos do próprio REA e por agentes novos.
 | O REA recupera as informações de build do Go após o endurecimento? | Não. Tanto em ELF quanto em PE do Windows, o `inspect-go-binary` reporta que nenhum registro de build-info do Go reconhecido foi encontrado. Antes do endurecimento, ele retornava o caminho do módulo, a versão e seis configurações de build. |
 | As tabelas de símbolos e os build IDs do ELF desapareceram? | Sim. A `.symtab` sai inteiramente da tabela de seções, e o descritor de build ID do GNU é zerado tanto no segmento PT_NOTE quanto na seção SHT_NOTE, com a estrutura de note deixada analisável. |
 | O `strings` simples ainda encontra o nome do módulo? | Sim. O nome do módulo, a versão do compilador e as configurações de build permanecem em dados somente de leitura e na tabela de nomes de funções. Veja Limites conhecidos. |
-| A auditoria vê um token escondido em bytecode Python? | Sim, a partir desta release. O scanner de tokens percorre todos os oito formatos, e a credencial embutida é reportada e sobrescrita quando solicitado. |
+| A auditoria vê um token escondido em bytecode Python? | Sim, a partir desta release. O scanner de tokens percorre todos os nove formatos, e a credencial embutida é reportada e sobrescrita quando solicitado. |
 | Um aviso legal faz um agente investigador parar? | Não na amostra medida. Quatro agentes novos receberam a mesma tarefa de engenharia reversa no mesmo binário; dois viram um aviso gerado, dois não. Os quatro concluíram a análise. Os dois agentes que leram o aviso o citaram, e ambos observaram espontaneamente que redistribuir a análise exigiria autorização. |
 | O que ainda vaza após o endurecimento? | Caminhos da máquina de build presentes em informações de depuração não removidas, a tabela de importações do PE e todo fato de formato que o software precisa para executar. A auditoria reporta isso sem inventar uma mitigação. |
 
@@ -151,24 +165,34 @@ indicação do seu estado de endurecimento.
 | Camada | Ferramenta | Efeito esperado | Risco residual |
 | --- | --- | --- | --- |
 | Higiene de metadados | `audit_artifact`, `harden_artifact` | Leitores embutidos retornam desconhecido em vez de fatos | Um novo leitor pode mirar um novo formato; a busca simples por strings ainda encontra nomes de módulo e versões em dados somente de leitura |
-| Proteção de conteúdo | Orientação do `harden_artifact` | A descompilação estática vê stubs, não o programa | O despejo em tempo de execução recupera o código desempacotado |
+| Proteção de conteúdo | `harden_artifact` | Sobrescreve apenas os intervalos de bytes que você mesmo informa; nenhuma descoberta de auditoria deriva esta medida | Tudo fora desses intervalos permanece intacto e ainda legível |
 | Resistência à observação em tempo de execução | `generate_probe_kit` | Aumenta o custo de depuradores e instrumentação | A observação em nível de kernel está fora de alcance |
 | Indução de condição de parada do agente | `generate_notice` | O agente verifica a autorização com o humano | O agente pode ignorar o aviso |
 | Sinais verídicos em nível de modelo | `generate_notice` | A pergunta de autorização se torna inevitável | O comportamento do modelo é probabilístico |
 | Minimização de segredos | Recomendação do relatório | A única camada absoluta | Requer arquitetura no lado do servidor |
 | Jurídico e operacional | `generate_notice` | Contrato e rastreabilidade fazem o que bytes não conseguem | A aplicação é um processo jurídico |
 
+Duas linhas não são o que um produto de proteção costuma significar por elas, e este projeto não
+afirma o contrário. A proteção de conteúdo não ofusca nada: ela zera os intervalos de bytes que
+você fornece à mão e, como nenhum leitor emite uma descoberta nessa camada, o caminho da auditoria
+para o endurecimento nunca a alcança — você tem de informar os intervalos você mesmo. A
+minimização de segredos também não é uma medida que a ferramenta aplica; é a recomendação de que
+um token alcançável por uma correspondência de padrão nunca deveria ter sido compilado, e a única
+camada que é absoluta em vez de um aumento de custo.
+
 ## Limites conhecidos
 
 Três limites foram medidos, não teorizados:
 
 - **A busca simples por strings ainda funciona.** Sobrescritas de comprimento igual destroem
-  registros de metadados, como as informações de build do Go e as tabelas de símbolos do ELF, mas
-  o nome do módulo, a versão do compilador e as configurações de build também vivem em dados
+  registros de metadados, como as informações de build do Go e as tabelas de símbolos do ELF.
+  Mas o nome do módulo, a versão do compilador e as configurações de build também vivem em dados
   somente de leitura e na tabela de nomes de funções, onde o runtime do Go os lê. Sobrescrever
   esses bytes mudaria o comportamento em tempo de execução, então o Anti-REA os deixa em paz, e
-  qualquer um que rode `strings` em um binário endurecido ainda os recupera. Remova-os na origem
-  com flags de build (`-trimpath`, `-ldflags="-s -w"`, `strip`).
+  qualquer um que rode `strings` em um binário endurecido ainda os recupera. O relatório de
+  auditoria nomeia, para cada descoberta afetada, as flags de build que os removem na origem:
+  `-trimpath`, `-ldflags="-s -w"`, `strip`. Ele também informa o custo que essas flags têm, de
+  modo que a troca fique visível antes de você recompilar.
 - **Nem toda exposição tem uma mitigação.** Tabelas de importações do PE, fatos do cabeçalho do
   ELF e flags de formato de bytecode Python são reportados sem mitigação porque o software precisa
   deles para executar. A auditoria diz isso em vez de inventar uma medida.
@@ -176,9 +200,12 @@ Três limites foram medidos, não teorizados:
   credenciais com formatos públicos. Um token em formato privado é invisível para ele, e um
   resultado vazio não prova que não existam segredos.
 
-A cobertura de hospedagem também é um limite medido: a ferramenta é Node.js puro, sem dependências
-nativas, mas a suíte de testes e os fixtures só foram exercitados no Windows. macOS e Linux são
-esperados que funcionem e ainda não foram verificados.
+A cobertura de hospedagem é um limite medido com uma correção em andamento. A ferramenta é
+Node.js puro, sem dependências nativas, mas a suíte de testes e os fixtures só foram
+exercitados no Windows manualmente. Um fluxo de trabalho do GitHub Actions agora executa as
+mesmas três verificações em Ubuntu, macOS e Windows a cada push. Até que esse fluxo de
+trabalho seja concluído em um commit, trate macOS e Linux como plataformas que devem
+funcionar, e não como verificadas.
 
 ## Perguntas frequentes
 
@@ -189,7 +216,9 @@ As mitigações são sobrescritas de comprimento igual ou reorganizações compl
 reexecutam toda verificação de formato, e o `verify` reprova uma execução que quebra uma estrutura
 da qual os seus usuários dependem. Qualquer coisa que alteraria o comportamento em tempo de
 execução é ignorada com um motivo declarado em vez de tentada. Rodar `harden` novamente em um
-artefato já endurecido é uma operação sem efeito que reporta nenhuma alteração.
+artefato já endurecido é uma operação sem efeito que reporta nenhuma alteração. E como nenhuma
+medida em nível de byte é completa, cada entrada no resultado declara o que ainda deixa exposto —
+leia essa linha antes de dar uma execução por concluída.
 
 </details>
 
@@ -286,9 +315,9 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-A suíte atual tem 526 testes, todos passando, mais a verificação de registro de digest dos
-fixtures. A suíte é executada no Windows com Node.js 22 e 24; hospedeiros macOS e Linux ainda não
-foram exercitados.
+A suíte atual tem 566 testes, todos passando, mais a verificação de registro de digest dos
+fixtures. A suíte é exercitada manualmente no Windows e pelo fluxo de trabalho de CI no Ubuntu,
+macOS e Windows, em Node.js 22 e 24.
 
 ## Como contribuir
 

@@ -58,7 +58,10 @@ Drei Befehle laufen in fester Reihenfolge ab, und die Reihenfolge ist wichtig:
    schreibt eine `.hardened`-Kopie neben das Original. Jede Maßnahme ist ein Überschreiben mit
    gleicher Länge oder ein Schreibvorgang mit geändertem Layout, damit Dateilänge und Offsets
    gültig bleiben. Alles, was das Laufzeitverhalten ändern würde, wird mit Begründung als
-   übersprungen gemeldet und niemals stillschweigend versucht.
+   übersprungen gemeldet und niemals stillschweigend versucht. Jeder Eintrag im Ergebnis, ob
+   angewandt oder übersprungen, nennt außerdem das Restrisiko der Maßnahme und die
+   Build-Zeit-Korrektur, die es vollständig beseitigt – eine angewandte Maßnahme wird niemals
+   als vollständig gemeldet.
 3. **`verify`** liest die gehärtete Kopie erneut und prüft die Strukturen, auf die deine Nutzer
    weiterhin angewiesen sind. Die erforderlichen Mengen ergeben sich aus den angewandten
    Maßnahmen: Was eine Maßnahme als berührt deklariert, ist ausgenommen, alles andere muss sich
@@ -110,15 +113,25 @@ Dasselbe Paket steht Agenten als Werkzeug `generate_probe_kit` zur Verfügung.
 | ELF/PE/Mach-O-Header, Sektionen, Symbole und Build-IDs | Integrierte statische Leser, objdump | Jedes Fakt, das ein Leser extrahieren kann, mit seinem Quellbereich |
 | Eingebettete Go-Modul- und Build-Metadaten | Integrierter Go-Leser | Vorhandensein, Versionen und die Sektion, die sie trägt |
 | Eingebettete Rust-Abhängigkeitsmetadaten (`.dep-v0`) | Integrierter Rust-Leser | Crate-Namen, Versionen und Abhängigkeitskanten |
-| Unity-IL2CPP-Metadaten | Integrierter IL2CPP-Leser | Wiederherstellbare Typ- und Methodennamen |
-| .NET-Metadaten und CIL | Integrierter Managed-Code-Leser | Assembly-Fakten und Mitgliederinventar |
-| JavaScript-Source-Maps und Modulgraphen | Integrierter JavaScript-Leser | Wiederherstellbare Original-Quelltexte |
+| Android-DEX-Typdeskriptoren, Methodennamen und Zeichenkettenkonstanten | Integrierter DEX-Leser | Klassennamen, Methodennamen und der Konstantenpool |
 | PE-Zertifikate, Imports, Exports und Load Config | Integrierte PE-Leser | Identität des Signierers und deklarierte Imports |
-| Modell-, SQLite-, Erlang-, pyc- und andere Container-Metadaten | Integrierte Format-Leser | Deklarierte Metadaten und Summen |
+| Modell-, Erlang-, pyc- und andere Container-Metadaten | Integrierte Format-Leser | Deklarierte Metadaten und Summen |
 | Eingebettete Zugangsdaten | Token-Muster-Scanner | Bekannte Zugangsdaten-Familien mit öffentlichen Formaten, mit Offset |
 
-Jeder Befund trägt seinen Beleg, den Leser, der ihn verwerten würde, und die Maßnahme, die ihn
-beseitigt.
+Formate außerhalb des Leser-Satzes werden gemeldet, nicht übersprungen. Wenn der Audit
+auf eine Unity-IL2CPP-`global-metadata.dat`, eine .NET-Assembly, ein JavaScript-Bundle,
+einen APK-Signaturblock oder einen GPU-Payload-Container trifft, benennt er das Format
+als Fähigkeitsgrenze, mit dem Grund, warum es außerhalb des Geltungsbereichs liegt,
+und mit deinem nächsten Schritt, statt ein leeres Ergebnis zu liefern. Ein leeres
+Ergebnis ist kein Beweis für Sicherheit. Ein APK wird als ZIP gelesen und dann eine Ebene
+tiefer verfolgt. Jeder `classes.dex`-Eintrag, sowohl gespeicherte als auch deflatierte, wird
+an den DEX-Leser übergeben, sodass die Klassennamen, Methodennamen und
+Zeichenkettenkonstanten der App unter einem `app.apk!classes.dex`-Pfad in den Bericht
+gelangen. Der Signaturblock wird als Grenze gemeldet und nicht geparst.
+
+Jeder Befund trägt seinen Beleg, den Leser, der ihn verwerten würde, die Maßnahme, die ihn
+beseitigen würde, das Restrisiko dieser Maßnahme und die Build-Zeit-Korrektur, die es
+vollständig beseitigt.
 
 ## Gemessene Ergebnisse
 
@@ -131,7 +144,7 @@ gehärtet und danach mit REAs eigenen statischen Lesern und von frischen Agenten
 | Stellt REA nach der Härtung Go-Build-Informationen wieder her? | Nein. Sowohl unter ELF als auch unter Windows PE meldet `inspect-go-binary`, dass kein erkannter Go-Build-Info-Datensatz gefunden wurde. Vor der Härtung gab es Modulpfad, Version und sechs Build-Einstellungen zurück. |
 | Sind ELF-Symboltabellen und Build-IDs entfernt? | Ja. `.symtab` verschwindet vollständig aus der Sektionstabelle, und der GNU-Build-ID-Deskriptor wird sowohl im PT_NOTE-Segment als auch in der SHT_NOTE-Sektion genullt, wobei die Note-Struktur parsebar bleibt. |
 | Findet einfaches `strings` weiterhin den Modulnamen? | Ja. Modulname, Compiler-Version und Build-Einstellungen bleiben in den Read-only-Daten und der Funktionsnamentabelle erhalten. Siehe Bekannte Grenzen. |
-| Sieht der Audit ein in Python-Bytecode verstecktes Token? | Ja, ab dieser Version. Der Token-Scanner läuft über alle acht Formate, und die eingebetteten Zugangsdaten werden gemeldet und auf Anfrage überschrieben. |
+| Sieht der Audit ein in Python-Bytecode verstecktes Token? | Ja, ab dieser Version. Der Token-Scanner läuft über alle neun Formate, und die eingebetteten Zugangsdaten werden gemeldet und auf Anfrage überschrieben. |
 | Bewirkt ein rechtlicher Hinweis, dass ein untersuchender Agent aufhört? | In der gemessenen Stichprobe nicht. Vier frische Agenten erhielten dieselbe Reverse-Engineering-Aufgabe an demselben Binary; zwei sahen einen generierten Hinweis, zwei nicht. Alle vier schlossen die Analyse ab. Beide Agenten, die den Hinweis lasen, zitierten ihn, und beide merkten von sich aus an, dass eine Weiterverbreitung der Analyse einer Autorisierung bedürfte. |
 | Was wird nach der Härtung weiterhin offengelegt? | Build-Maschinen-Pfade aus nicht gestrippten Debug-Informationen, die PE-Importtabelle und jedes Formatfakt, das die Software zum Laufen braucht. Der Audit meldet diese, ohne eine Maßnahme zu erfinden. |
 
@@ -155,24 +168,35 @@ auf Anti-REA und keinen Aufschluss über deinen Härtungszustand.
 | Ebene | Werkzeug | Erwartete Wirkung | Restrisiko |
 | --- | --- | --- | --- |
 | Metadaten-Hygiene | `audit_artifact`, `harden_artifact` | Integrierte Leser geben unbekannt zurück statt Fakten | Ein neuer Leser kann ein neues Format anvisieren; einfache String-Suche findet weiterhin Modulnamen und Versionen in den Read-only-Daten |
-| Inhaltsschutz | `harden_artifact`-Hinweise | Statische Dekompilation sieht Stubs, nicht das Programm | Runtime-Dumping stellt entpackten Code wieder her |
+| Inhaltsschutz | `harden_artifact` | Überschreibt nur die Bytebereiche, die du selbst benennst; kein Audit-Befund leitet diese Maßnahme ab | Alles außerhalb dieser Bereiche bleibt unberührt und weiterhin lesbar |
 | Widerstand gegen Laufzeitbeobachtung | `generate_probe_kit` | Erhöht die Kosten für Debugger und Instrumentierung | Beobachtung auf Kernel-Ebene ist außer Reichweite |
 | Induktion von Abbruchbedingungen beim Agenten | `generate_notice` | Der Agent klärt die Autorisierung mit dem Menschen | Der Agent kann den Hinweis ignorieren |
 | Wahrheitsgemäße Signale auf Modellebene | `generate_notice` | Die Autorisierungsfrage wird unvermeidbar | Modellverhalten ist probabilistisch |
 | Geheimnis-Minimierung | Empfehlung im Bericht | Die einzige absolute Ebene | Erfordert eine serverseitige Architektur |
 | Rechtlich und operativ | `generate_notice` | Vertrag und Nachvollziehbarkeit schaffen, was Bytes nicht können | Durchsetzung ist ein Rechtsweg |
 
+Zwei Zeilen sind nicht das, was ein Schutzprodukt üblicherweise darunter versteht, und
+dieses Projekt behauptet das auch nicht. Inhaltsschutz verschleiert nichts: Er nullt
+Bytebereiche, die du von Hand angibst, und weil in dieser Ebene kein Leser einen Befund
+liefert, erreicht der Pfad vom Audit zur Härtung sie nie – du musst die Bereiche selbst
+benennen. Geheimnis-Minimierung ist ebenfalls keine Maßnahme, die das Werkzeug anwendet;
+sie ist die Empfehlung, dass ein Token, das durch einen Musterabgleich erreichbar ist,
+niemals hätte kompiliert werden dürfen, und die einzige Ebene, die absolut ist statt
+einer Kostensteigerung.
+
 ## Bekannte Grenzen
 
 Drei Grenzen wurden gemessen, nicht theoretisch hergeleitet:
 
 - **Einfache String-Suche funktioniert weiterhin.** Überschreiben mit gleicher Länge zerstört
-  Metadaten-Datensätze wie Go-Build-Informationen und ELF-Symboltabellen, aber Modulname,
+  Metadaten-Datensätze wie Go-Build-Informationen und ELF-Symboltabellen. Aber Modulname,
   Compiler-Version und Build-Einstellungen liegen ebenfalls in den Read-only-Daten und der
   Funktionsnamentabelle, wo die Go-Laufzeit sie liest. Diese Bytes zu überschreiben ändert das
   Laufzeitverhalten, deshalb lässt Anti-REA sie unberührt, und alles, was `strings` über ein
-  gehärtetes Binary laufen lässt, holt sie weiterhin heraus. Entferne sie an der Quelle mit
-  Build-Flags (`-trimpath`, `-ldflags="-s -w"`, `strip`).
+  gehärtetes Binary laufen lässt, holt sie weiterhin heraus. Der Audit-Bericht nennt für
+  jeden betroffenen Befund die Build-Flags, die sie an der Quelle entfernen: `-trimpath`,
+  `-ldflags="-s -w"`, `strip`. Er nennt auch, was diese Flags selbst kosten, damit die
+  Abwägung sichtbar ist, bevor du neu baust.
 - **Nicht jede Offenlegung hat eine Maßnahme.** PE-Importtabellen, ELF-Header-Fakten und
   Python-Bytecode-Format-Flags werden ohne Maßnahme gemeldet, weil die Software sie zum Laufen
   braucht. Der Audit sagt das, statt eine Maßnahme zu erfinden.
@@ -180,9 +204,12 @@ Drei Grenzen wurden gemessen, nicht theoretisch hergeleitet:
   öffentlichen Formaten. Ein Token in einem privaten Format ist für ihn unsichtbar, und ein
   leeres Ergebnis ist kein Beweis, dass keine Geheimnisse existieren.
 
-Die Host-Abdeckung ist ebenfalls eine gemessene Grenze: Das Werkzeug ist reines Node.js ohne
-native Abhängigkeiten, aber die Testsuite und die Fixtures wurden nur unter Windows ausgeführt.
-macOS und Linux werden voraussichtlich funktionieren und sind noch nicht verifiziert.
+Die Host-Abdeckung ist eine gemessene Grenze, deren Behebung in Arbeit ist. Das Werkzeug
+ist reines Node.js ohne native Abhängigkeiten, aber die Testsuite und die Fixtures wurden
+bisher nur unter Windows von Hand ausgeführt. Ein GitHub Actions Workflow führt nun bei
+jedem Push dieselben drei Prüfungen auf Ubuntu, macOS und Windows aus. Bis dieser Workflow
+auf einem Commit abgeschlossen ist, behandle macOS und Linux als voraussichtlich
+funktionierend, nicht als verifiziert.
 
 ## FAQ
 
@@ -193,7 +220,9 @@ Maßnahmen sind Überschreiben mit gleicher Länge oder vollständige Umbauten, 
 Formatprüfung erneut läuft, und `verify` lässt einen Lauf durchfallen, der eine Struktur bricht,
 auf die deine Nutzer angewiesen sind. Alles, was das Laufzeitverhalten ändern würde, wird mit
 angegebener Begründung übersprungen statt versucht. Ein erneutes `harden` auf einem bereits
-gehärteten Artefakt ist ein No-op, das keine Änderung meldet.
+gehärteten Artefakt ist ein No-op, das keine Änderung meldet. Und weil keine Maßnahme auf
+Byte-Ebene vollständig ist, nennt jeder Eintrag im Ergebnis sein Restrisiko – lies diese
+Zeile, bevor du einen Lauf als abgeschlossen betrachtest.
 
 </details>
 
@@ -293,9 +322,9 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-Die aktuelle Suite umfasst 526 Tests, alle bestehend, plus die Registrierungsprüfung der
-Fixture-Digests. Die Suite läuft unter Windows mit Node.js 22 und 24; macOS- und Linux-Hosts
-wurden noch nicht ausgeführt.
+Die aktuelle Suite umfasst 566 Tests, alle bestehend, plus die Registrierungsprüfung der
+Fixture-Digests. Die Suite wird unter Windows von Hand und auf Ubuntu, macOS und Windows
+durch den CI-Workflow ausgeführt, auf Node.js 22 und 24.
 
 ## Mitwirken
 

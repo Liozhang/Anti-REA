@@ -55,7 +55,10 @@ Three commands run in order, and the order matters:
 2. **`harden`** takes that report and applies the mitigations it can, writing a `.hardened`
    copy beside the original. Every mitigation is an equal-length overwrite or a relayout
    write, so file length and offsets stay valid. Anything that would change runtime behavior
-   is reported as skipped with its reason, never silently attempted.
+   is reported as skipped with its reason, never silently attempted. Every entry in the
+   result, applied or skipped, also states what the mitigation still leaves exposed and the
+   build-time fix that removes the exposure outright — an applied measure is never reported
+   as a complete one.
 3. **`verify`** re-reads the hardened copy and checks the structures your users still depend
    on. The required sets are derived from the applied mitigations: what a mitigation declares
    it touches is exempted, everything else must still parse. A hardening run that breaks a
@@ -118,15 +121,23 @@ to agents as the `generate_probe_kit` tool.
 | ELF/PE/Mach-O headers, sections, symbols, build IDs | Built-in static readers, objdump | Every fact a reader can extract, with its source range |
 | Embedded Go module and build metadata | Built-in Go reader | Presence, versions, and the section that carries them |
 | Embedded Rust dependency metadata (`.dep-v0`) | Built-in Rust reader | Crate names, versions, and dependency edges |
-| Unity IL2CPP metadata | Built-in IL2CPP reader | Recoverable type and method names |
-| .NET metadata and CIL | Built-in managed reader | Assembly facts and member inventory |
-| JavaScript source maps and module graphs | Built-in JavaScript reader | Recoverable original sources |
+| Android DEX type descriptors, method names and string constants | Built-in DEX reader | Class names, method names, and the constant pool |
 | PE certificates, imports, exports, load config | Built-in PE readers | Signer identity and declared imports |
-| Model, SQLite, Erlang, pyc and other container metadata | Built-in format readers | Declared metadata and totals |
+| Model, Erlang, pyc and other container metadata | Built-in format readers | Declared metadata and totals |
 | Embedded credentials | Token pattern scanner | Known credential families with public formats, with offset |
 
-Each finding carries its evidence, the reader that would consume it, and the mitigation
-that removes it.
+Formats outside the reader set are reported, not skipped. When the audit meets a Unity
+IL2CPP `global-metadata.dat`, a .NET assembly, a JavaScript bundle, an APK signature
+block, or a GPU payload container, it names the format as a capability boundary with the
+reason it is out of scope and your next step, instead of returning an empty result. An
+empty result is not proof of safety. An APK is read as a ZIP and then followed one level
+into it: each `classes.dex` entry, stored or deflated, is handed to the DEX reader, so the
+app's class names, method names, and string constants reach the report at the path
+`app.apk!classes.dex`. The signature block is reported as a boundary rather than parsed.
+
+Each finding carries its evidence, the reader that would consume it, the mitigation that
+would remove it, what that mitigation still leaves exposed, and the build-time fix that
+removes the exposure outright.
 
 ## Measured results
 
@@ -139,7 +150,7 @@ with REA's own static readers and by fresh agents.
 | Does REA recover Go build information after hardening? | No. On both ELF and Windows PE, `inspect-go-binary` reports that no recognized Go build-info record was found. Before hardening it returned the module path, version, and six build settings. |
 | Are ELF symbol tables and build IDs gone? | Yes. `.symtab` leaves the section table entirely, and the GNU build-ID descriptor is zeroed in both the PT_NOTE segment and the SHT_NOTE section, with the note structure left parseable. |
 | Can plain `strings` still find the module name? | Yes. The module name, compiler version, and build settings remain in read-only data and the function name table. See Known limits. |
-| Does the audit see a token hidden in Python bytecode? | Yes, as of this release. The token scanner runs over all eight formats, and the embedded credential is reported and overwritten on request. |
+| Does the audit see a token hidden in Python bytecode? | Yes, as of this release. The token scanner runs over all nine formats, and the embedded credential is reported and overwritten on request. |
 | Does a legal notice make an investigating agent stop? | Not in the measured sample. Four fresh agents received the same reverse-engineering task on the same binary; two saw a generated notice, two did not. All four completed the analysis. Both agents that read the notice cited it, and both volunteered that redistributing the analysis would need authorization. |
 | What still leaks after hardening? | Build-machine paths from unstripped debug information, the PE import table, and every format fact the software needs to run. The audit reports these without inventing a mitigation. |
 
@@ -161,31 +172,44 @@ contain no reference to Anti-REA and no hint of your hardening state.
 | Layer | Tool | Expected effect | Residual risk |
 | --- | --- | --- | --- |
 | Metadata hygiene | `audit_artifact`, `harden_artifact` | Built-in readers return unknown instead of facts | A new reader can target a new format; plain string search still finds module names and versions in read-only data |
-| Content protection | `harden_artifact` guidance | Static decompilation sees stubs, not the program | Runtime dumping recovers unpacked code |
+| Content protection | `harden_artifact` | Overwrites only the byte ranges you name yourself; no audit finding derives this measure | Everything outside those ranges is untouched and still readable |
 | Runtime observation resistance | `generate_probe_kit` | Raises the cost of debuggers and instrumentation | Kernel-level observation is out of reach |
 | Agent stop-condition induction | `generate_notice` | The agent checks authorization with the human | The agent may ignore the notice |
 | Model-level truthful signals | `generate_notice` | The authorization question becomes unavoidable | Model behavior is probabilistic |
 | Secret minimization | Report recommendation | The only absolute layer | Requires server-side architecture |
 | Legal and operational | `generate_notice` | Contract and traceability do what bytes cannot | Enforcement is a legal process |
 
+Two rows are not what a protection product usually means by them, and this project does
+not claim otherwise.
+
+Content protection does not obfuscate anything. It zeroes the byte ranges you supply by
+hand. No reader emits a finding in that layer, so the audit-to-harden path never reaches
+it: you have to name the ranges yourself.
+
+Secret minimization is not a measure the tool applies either. It is the recommendation
+that a token reachable by a pattern match should never have been compiled in. It is also
+the only layer that is absolute rather than a cost increase.
+
 ## Known limits
 
 Three limits were measured, not theorized:
 
-- **Plain string search still works.** Equal-length overwrites destroy metadata records such as Go build information and ELF symbol tables, but the module name, compiler version, and build settings also live in read-only data and the function name table, where the Go runtime reads them. Overwriting those bytes changes runtime behavior, so Anti-REA leaves them alone, and anything that runs `strings` on a hardened binary still recovers them. Remove them at the source with build flags (`-trimpath`, `-ldflags="-s -w"`, `strip`).
+- **Plain string search still works.** Equal-length overwrites destroy metadata records such as Go build information and ELF symbol tables. But the module name, compiler version, and build settings also live in read-only data and the function name table, where the Go runtime reads them. Overwriting those bytes changes runtime behavior, so Anti-REA leaves them alone, and anything that runs `strings` on a hardened binary still recovers them. The audit report names the build flags that remove them at the source for each affected finding: `-trimpath`, `-ldflags="-s -w"`, `strip`. It also states what those flags themselves cost, so the tradeoff is visible before you rebuild.
 - **Not every exposure has a mitigation.** PE import tables, ELF header facts, and Python bytecode format flags are reported with no mitigation because the software needs them to run. The audit says so instead of inventing a measure.
 - **Token patterns cover known formats only.** The scanner matches credential families with public formats. A token in a private format is invisible to it, and an empty result is not proof that no secrets exist.
 
-Host coverage is also a measured limit: the tool is pure Node.js with no native
-dependencies, but the test suite and fixtures have only been exercised on Windows.
-macOS and Linux are expected to work and are not yet verified.
+Host coverage is a measured limit with a fix in progress. The tool is pure Node.js
+with no native dependencies, but the test suite and fixtures were only ever exercised
+on Windows by hand. A GitHub Actions workflow now runs the same three checks on
+Ubuntu, macOS, and Windows on every push; until that workflow has completed on a
+commit, treat macOS and Linux as expected to work rather than verified.
 
 ## FAQ
 
 <details>
 <summary><strong>Will hardening break my application?</strong></summary>
 
-Mitigations are equal-length overwrites or full relayouts that re-run every format check, and `verify` fails a run that breaks a structure your users depend on. Anything that would change runtime behavior is skipped with a stated reason instead of attempted. Re-running `harden` on an already hardened artifact is a no-op that reports no change.
+Mitigations are equal-length overwrites or full relayouts that re-run every format check, and `verify` fails a run that breaks a structure your users depend on. Anything that would change runtime behavior is skipped with a stated reason instead of attempted. Re-running `harden` on an already hardened artifact is a no-op that reports no change. And because no byte-level measure is a complete one, every entry in the result states what it still leaves exposed — read that line before you call a run finished.
 
 </details>
 
@@ -270,9 +294,9 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-The current suite is 526 tests, all passing, plus the fixture digest registration check.
-The suite runs on Windows with Node.js 22 and 24; macOS and Linux hosts have not been
-exercised yet.
+The current suite is 566 tests, all passing, plus the fixture digest registration check.
+The suite is exercised on Windows by hand and on Ubuntu, macOS, and Windows by the CI
+workflow, on Node.js 22 and 24.
 
 ## Contributing
 

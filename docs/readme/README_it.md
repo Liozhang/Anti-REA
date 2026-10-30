@@ -58,7 +58,10 @@ Tre comandi vengono eseguiti in ordine, e l'ordine conta:
    `.hardened` accanto all'originale. Ogni mitigazione è una sovrascrittura di lunghezza uguale o
    una scrittura con riorganizzazione, quindi lunghezza del file e offset restano validi.
    Qualsiasi intervento che cambierebbe il comportamento a runtime viene segnalato come saltato,
-   con il motivo, e non viene mai tentato in silenzio.
+   con il motivo, e non viene mai tentato in silenzio. Ogni voce del risultato, applicata o
+   saltata, indica anche ciò che la mitigazione lascia ancora esposto e la correzione in fase di
+   compilazione che elimina l'esposizione del tutto: una misura applicata non viene mai presentata
+   come completa.
 3. **`verify`** rilegge la copia protetta e controlla le strutture da cui i tuoi utenti dipendono
    ancora. Gli insiemi richiesti derivano dalle mitigazioni applicate: ciò che una mitigazione
    dichiara di toccare viene esentato, tutto il resto deve continuare a essere interpretabile.
@@ -109,15 +112,25 @@ Lo stesso pacchetto è disponibile per gli agenti come strumento `generate_probe
 | Intestazioni, sezioni, simboli e ID di build ELF/PE/Mach-O | Lettori statici integrati, objdump | Ogni fatto che un lettore può estrarre, con il proprio intervallo di origine |
 | Metadati di modulo e build Go incorporati | Lettore Go integrato | Presenza, versioni e la sezione che li contiene |
 | Metadati delle dipendenze Rust incorporati (`.dep-v0`) | Lettore Rust integrato | Nomi delle crate, versioni e archi di dipendenza |
-| Metadati Unity IL2CPP | Lettore IL2CPP integrato | Nomi di tipi e metodi recuperabili |
-| Metadati .NET e CIL | Lettore managed integrato | Fatti degli assembly e inventario dei membri |
-| Source map e grafi dei moduli JavaScript | Lettore JavaScript integrato | Sorgenti originali recuperabili |
+| Descrittori di tipo DEX Android, nomi di metodi e costanti di stringa | Lettore DEX integrato | Nomi di classi, nomi di metodi e pool di costanti |
 | Certificati, importazioni, esportazioni e configurazione di caricamento PE | Lettori PE integrati | Identità del firmatario e importazioni dichiarate |
-| Metadati di contenitori per modelli, SQLite, Erlang, pyc e altri formati | Lettori di formato integrati | Metadati dichiarati e totali |
+| Metadati di contenitori per modelli, Erlang, pyc e altri formati | Lettori di formato integrati | Metadati dichiarati e totali |
 | Credenziali incorporate | Scanner di pattern per token | Famiglie di credenziali note con formati pubblici, con offset |
 
-Ogni riscontro riporta la propria evidenza, il lettore che lo consumerebbe e la mitigazione che lo
-elimina.
+I formati che non rientrano nell'insieme dei lettori vengono riportati, non saltati. Quando
+l'audit incontra un `global-metadata.dat` di Unity IL2CPP, un assembly .NET, un bundle
+JavaScript, un blocco di firma APK o un contenitore di payload GPU, nomina il formato come
+limite di capacità, con il motivo per cui è fuori portata e il passo successivo, anziché
+restituire un risultato vuoto. Un risultato vuoto non è una prova di sicurezza. Un APK
+viene letto come ZIP e poi seguito un livello più a fondo. Ogni voce `classes.dex`, sia
+memorizzata che decompressa, viene consegnata al lettore DEX, così i nomi di classi,
+nomi di metodi e costanti di stringa dell'app raggiungono il rapporto sotto un percorso
+`app.apk!classes.dex`. Il blocco di firma viene riportato come limite di capacità
+anziché analizzato.
+
+Ogni riscontro riporta la propria evidenza, il lettore che lo consumerebbe, la mitigazione che lo
+eliminerebbe, ciò che tale mitigazione lascia ancora esposto e la correzione in fase di
+compilazione che elimina l'esposizione del tutto.
 
 ## Risultati misurati
 
@@ -130,7 +143,7 @@ strumento e poi riletti con i lettori statici di REA e da agenti nuovi.
 | REA recupera le informazioni di build Go dopo la protezione? | No. Sia su ELF sia su Windows PE, `inspect-go-binary` segnala che non è stato trovato alcun record di build-info Go riconosciuto. Prima della protezione restituiva il percorso del modulo, la versione e sei impostazioni di build. |
 | Le tabelle dei simboli ELF e gli ID di build sono spariti? | Sì. `.symtab` esce del tutto dalla tabella delle sezioni, e il descrittore del build-ID GNU viene azzerato sia nel segmento PT_NOTE sia nella sezione SHT_NOTE, lasciando la struttura del note interpretabile. |
 | Il semplice `strings` riesce ancora a trovare il nome del modulo? | Sì. Il nome del modulo, la versione del compilatore e le impostazioni di build restano nei dati di sola lettura e nella tabella dei nomi delle funzioni. Vedi Limiti noti. |
-| L'audit vede un token nascosto nel bytecode Python? | Sì, a partire da questa release. Lo scanner di token opera su tutti gli otto formati, e la credenziale incorporata viene segnalata e sovrascritta su richiesta. |
+| L'audit vede un token nascosto nel bytecode Python? | Sì, a partire da questa release. Lo scanner di token opera su tutti i nove formati, e la credenziale incorporata viene segnalata e sovrascritta su richiesta. |
 | Un avviso legale ferma un agente che conduce un'indagine? | Non nel campione misurato. Quattro agenti nuovi hanno ricevuto lo stesso compito di ingegneria inversa sullo stesso binario; due hanno visto un avviso generato, due no. Tutti e quattro hanno completato l'analisi. Entrambi gli agenti che hanno letto l'avviso lo hanno citato, ed entrambi hanno fatto notare spontaneamente che ridistribuire l'analisi avrebbe richiesto un'autorizzazione. |
 | Cosa continua a trapelare dopo la protezione? | I percorsi della macchina di build nelle informazioni di debug non rimosse, la tabella delle importazioni PE e ogni fatto di formato necessario al software per funzionare. L'audit riporta questi elementi senza inventare una mitigazione. |
 
@@ -154,24 +167,34 @@ indizi sul tuo stato di protezione.
 | Livello | Strumento | Effetto atteso | Rischio residuo |
 | --- | --- | --- | --- |
 | Igiene dei metadati | `audit_artifact`, `harden_artifact` | I lettori integrati restituiscono sconosciuto invece dei fatti | Un nuovo lettore può prendere di mira un nuovo formato; la ricerca testuale semplice trova ancora nomi di modulo e versioni nei dati di sola lettura |
-| Protezione del contenuto | Indicazioni di `harden_artifact` | La decompilazione statica vede stub, non il programma | Il dump a runtime recupera il codice spacchettato |
+| Protezione del contenuto | `harden_artifact` | Azzera solo gli intervalli di byte che nomini tu stesso; nessun riscontro dell'audit deriva questa misura | Tutto ciò che si trova al di fuori di quegli intervalli resta intatto e ancora leggibile |
 | Resistenza all'osservazione a runtime | `generate_probe_kit` | Alza il costo di debugger e strumentazione | L'osservazione a livello di kernel è fuori portata |
 | Induzione della condizione di arresto dell'agente | `generate_notice` | L'agente verifica l'autorizzazione con l'essere umano | L'agente può ignorare l'avviso |
 | Segnali veritieri a livello di modello | `generate_notice` | La domanda sull'autorizzazione diventa inevitabile | Il comportamento del modello è probabilistico |
 | Minimizzazione dei segreti | Raccomandazione del rapporto | L'unico livello assoluto | Richiede un'architettura lato server |
 | Legale e operativo | `generate_notice` | Contratto e tracciabilità fanno ciò che i byte non possono | L'applicazione è un processo legale |
 
+Due righe non sono ciò che un prodotto di protezione intende abitualmente per esse, e questo
+progetto non afferma il contrario. La protezione del contenuto non offusca nulla: azzera gli
+intervalli di byte che fornisci a mano e, poiché in quel livello nessun lettore emette un
+riscontro, il percorso dall'audit alla protezione non lo raggiunge mai — devi nominare tu stesso
+gli intervalli. La minimizzazione dei segreti non è nemmeno una misura che lo strumento applica;
+è la raccomandazione che un token raggiungibile da una corrispondenza di pattern non sarebbe mai
+dovuto essere compilato, ed è l'unico livello assoluto anziché un aumento di costo.
+
 ## Limiti noti
 
 Tre limiti sono stati misurati, non teorizzati:
 
 - **La ricerca testuale semplice funziona ancora.** Le sovrascritture di lunghezza uguale
-  distruggono i record di metadati come le informazioni di build Go e le tabelle dei simboli ELF,
-  ma il nome del modulo, la versione del compilatore e le impostazioni di build vivono anche nei
+  distruggono i record di metadati come le informazioni di build Go e le tabelle dei simboli ELF.
+  Ma il nome del modulo, la versione del compilatore e le impostazioni di build vivono anche nei
   dati di sola lettura e nella tabella dei nomi delle funzioni, dove il runtime Go li legge.
   Sovrascrivere quei byte cambia il comportamento a runtime, quindi Anti-REA li lascia stare, e
-  chiunque esegua `strings` su un binario protetto li recupera ancora. Rimuovili all'origine con
-  le flag di build (`-trimpath`, `-ldflags="-s -w"`, `strip`).
+  chiunque esegua `strings` su un binario protetto li recupera ancora. Il rapporto di audit
+  indica, per ogni riscontro interessato, le flag di build che li rimuovono all'origine:
+  `-trimpath`, `-ldflags="-s -w"`, `strip`. Indica anche il costo che tali flag comportano,
+  così che il compromesso sia visibile prima di ricompilare.
 - **Non ogni esposizione ha una mitigazione.** Le tabelle delle importazioni PE, i fatti delle
   intestazioni ELF e i flag di formato del bytecode Python vengono riportati senza mitigazione,
   perché il software ne ha bisogno per funzionare. L'audit lo dice invece di inventare una misura.
@@ -179,9 +202,12 @@ Tre limiti sono stati misurati, non teorizzati:
   credenziali con formati pubblici. Un token in un formato privato è invisibile allo scanner, e
   un risultato vuoto non prova che non esistano segreti.
 
-Anche la copertura delle piattaforme è un limite misurato: lo strumento è Node.js puro senza
-dipendenze native, ma la suite di test e le fixture sono state esercitate solo su Windows. macOS
-e Linux dovrebbero funzionare e non sono ancora verificati.
+Anche la copertura delle piattaforme è un limite misurato, con una correzione in corso. Lo
+strumento è Node.js puro senza dipendenze native, ma la suite di test e le fixture sono
+state esercitate solo a mano su Windows. Un flusso di lavoro di GitHub Actions esegue ora
+gli stessi tre controlli su Ubuntu, macOS e Windows a ogni push. Finché quel flusso di
+lavoro non è stato completato su un commit, considera macOS e Linux come piattaforme che
+dovrebbero funzionare, non come verificati.
 
 ## Domande frequenti
 
@@ -192,7 +218,9 @@ Le mitigazioni sono sovrascritture di lunghezza uguale o riorganizzazioni comple
 rieseguono ogni controllo di formato, e `verify` boccia un'esecuzione che rompe una struttura da
 cui dipendono i tuoi utenti. Qualsiasi intervento che cambierebbe il comportamento a runtime
 viene saltato con un motivo dichiarato anziché tentato. Rieseguire `harden` su un artefatto già
-protetto è un'operazione senza effetto che non riporta alcun cambiamento.
+protetto è un'operazione senza effetto che non riporta alcun cambiamento. E poiché nessuna misura
+a livello di byte è completa, ogni voce del risultato indica ciò che lascia ancora esposto: leggi
+quella riga prima di considerare conclusa un'esecuzione.
 
 </details>
 
@@ -291,9 +319,9 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-La suite attuale è di 526 test, tutti superati, più il controllo di registrazione dei digest
-delle fixture. La suite viene eseguita su Windows con Node.js 22 e 24; le piattaforme macOS e
-Linux non sono ancora state esercitate.
+La suite attuale è di 566 test, tutti superati, più il controllo di registrazione dei digest
+delle fixture. La suite viene esercitata a mano su Windows e dal flusso di lavoro CI su Ubuntu,
+macOS e Windows, su Node.js 22 e 24.
 
 ## Contribuire
 

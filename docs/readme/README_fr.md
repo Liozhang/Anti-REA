@@ -59,7 +59,10 @@ Trois commandes s'exécutent dans l'ordre, et cet ordre importe :
    écrivant une copie `.hardened` à côté de l'original. Chaque mesure est une réécriture de
    longueur égale ou une écriture après redisposition, si bien que la longueur du fichier et
    les décalages demeurent valides. Tout ce qui changerait le comportement à l'exécution est
-   signalé comme ignoré, motif à l'appui, et n'est jamais tenté en silence.
+   signalé comme ignoré, motif à l'appui, et n'est jamais tenté en silence. Chaque entrée du
+   résultat, appliquée ou ignorée, indique aussi ce que la mesure d'atténuation laisse encore
+   exposé et la correction au moment de la compilation qui élimine cette exposition — une
+   mesure appliquée n'est jamais présentée comme complète.
 3. **`verify`** relit la copie durcie et contrôle les structures dont vos utilisateurs
    dépendent encore. Les ensembles requis se déduisent des mesures appliquées : ce qu'une mesure
    déclare toucher est exempté, tout le reste doit encore s'analyser. Un durcissement qui casse
@@ -112,15 +115,25 @@ sous la forme de l'outil `generate_probe_kit`.
 | En-têtes, sections, symboles et identifiants de build ELF/PE/Mach-O | Lecteurs statiques intégrés, objdump | Chaque fait qu'un lecteur peut extraire, avec sa plage source |
 | Métadonnées de module et de build Go intégrées | Lecteur Go intégré | Présence, versions et section qui les porte |
 | Métadonnées de dépendances Rust intégrées (`.dep-v0`) | Lecteur Rust intégré | Noms des crates, versions et arêtes de dépendances |
-| Métadonnées Unity IL2CPP | Lecteur IL2CPP intégré | Noms de types et de méthodes récupérables |
-| Métadonnées et CIL .NET | Lecteur de code managé intégré | Faits d'assemblage et inventaire des membres |
-| Cartes de sources et graphes de modules JavaScript | Lecteur JavaScript intégré | Sources originales récupérables |
+| Descripteurs de type Android DEX, noms de méthodes et constantes de chaîne | Lecteur DEX intégré | Noms de classes, noms de méthodes et réservoir de constantes |
 | Certificats, imports, exports et configuration de chargement PE | Lecteurs PE intégrés | Identité du signataire et imports déclarés |
-| Métadonnées de conteneurs de modèles, SQLite, Erlang, pyc et autres | Lecteurs de formats intégrés | Métadonnées déclarées et totaux |
+| Métadonnées de conteneurs de modèles, Erlang, pyc et autres | Lecteurs de formats intégrés | Métadonnées déclarées et totaux |
 | Identifiants embarqués | Scanner de motifs de jetons | Familles d'identifiants connues aux formats publics, avec décalage |
 
-Chaque constatation porte sa preuve, le lecteur qui la consommerait et la mesure d'atténuation
-qui l'élimine.
+Les formats en dehors de l'ensemble de lecteurs sont rapportés, non ignorés. Lorsque
+l'audit rencontre un `global-metadata.dat` d'Unity IL2CPP, un assemblage .NET, un paquet
+JavaScript, un bloc de signature APK ou un conteneur de charge utile de processeur
+graphique, il nomme le format comme une limite de capacité, avec le motif de sa mise hors
+de portée et votre prochaine étape, au lieu de renvoyer un résultat vide. Un résultat vide
+ne prouve pas la sûreté. Un APK est lu comme un ZIP, puis suivi un niveau plus
+profond. Chaque entrée `classes.dex`, qu'il soit stocké comme dégonflé, est confiée au
+lecteur DEX, si bien que les noms de classes, noms de méthodes et constantes de chaîne
+de l'application atteignent le rapport sous un chemin `app.apk!classes.dex`. Le bloc de
+signature est rapporté comme une limite de capacité plutôt qu'analysé.
+
+Chaque constatation porte sa preuve, le lecteur qui la consommerait, la mesure d'atténuation
+qui l'éliminerait, ce que cette mesure laisse encore exposé et la correction au moment de la
+compilation qui élimine cette exposition.
 
 ## Résultats mesurés
 
@@ -134,7 +147,7 @@ agents nouvellement instanciés.
 | REA récupère-t-il les informations de build Go après durcissement ? | Non. Sur ELF comme sur Windows PE, `inspect-go-binary` signale qu'aucun enregistrement d'informations de build Go reconnu n'a été trouvé. Avant durcissement, il renvoyait le chemin du module, la version et six paramètres de build. |
 | Les tables de symboles ELF et les identifiants de build ont-ils disparu ? | Oui. `.symtab` quitte entièrement la table des sections, et le descripteur d'identifiant de build GNU est mis à zéro à la fois dans le segment PT_NOTE et dans la section SHT_NOTE, la structure de note demeurant analysable. |
 | Un simple `strings` trouve-t-il encore le nom du module ? | Oui. Le nom du module, la version du compilateur et les paramètres de build demeurent dans les données en lecture seule et dans la table des noms de fonctions. Voir Limites connues. |
-| L'audit voit-il un jeton caché dans du bytecode Python ? | Oui, à compter de cette version. Le scanner de jetons couvre les huit formats, et l'identifiant intégré est signalé puis réécrit sur demande. |
+| L'audit voit-il un jeton caché dans du bytecode Python ? | Oui, à compter de cette version. Le scanner de jetons couvre les neuf formats, et l'identifiant intégré est signalé puis réécrit sur demande. |
 | Une mention légale fait-elle s'arrêter un agent enquêteur ? | Pas dans l'échantillon mesuré. Quatre agents nouvellement instanciés ont reçu la même tâche de rétro-ingénierie sur le même binaire ; deux ont vu une mention générée, deux non. Les quatre ont mené l'analyse à son terme. Les deux agents qui ont lu la mention l'ont citée, et tous deux ont indiqué spontanément que la redistribution de l'analyse requerrait une autorisation. |
 | Que fuit-il encore après durcissement ? | Les chemins de la machine de build issus des informations de débogage non dépouillées, la table des imports PE, et chaque fait de format dont le logiciel a besoin pour fonctionner. L'audit les rapporte sans inventer de mesure d'atténuation. |
 
@@ -159,12 +172,21 @@ durcissement.
 | Couche | Outil | Effet attendu | Risque résiduel |
 | --- | --- | --- | --- |
 | Hygiène des métadonnées | `audit_artifact`, `harden_artifact` | Les lecteurs intégrés renvoient « inconnu » au lieu de faits | Un nouveau lecteur peut viser un nouveau format ; la recherche textuelle simple trouve encore les noms de modules et les versions dans les données en lecture seule |
-| Protection du contenu | Recommandations de `harden_artifact` | La décompilation statique voit des talons, pas le programme | Le vidage à l'exécution récupère le code dépaqueté |
+| Protection du contenu | `harden_artifact` | Ne met à zéro que les plages d'octets que vous nommez vous-même ; cette mesure ne découle d'aucune constatation d'audit | Tout ce qui se trouve hors de ces plages demeure intact et toujours lisible |
 | Résistance à l'observation à l'exécution | `generate_probe_kit` | Augmente le coût des débogueurs et de l'instrumentation | L'observation au niveau du noyau est hors de portée |
 | Induction d'une condition d'arrêt de l'agent | `generate_notice` | L'agent vérifie l'autorisation auprès de l'humain | L'agent peut ignorer la mention |
 | Signaux véridiques au niveau du modèle | `generate_notice` | La question de l'autorisation devient incontournable | Le comportement du modèle est probabiliste |
 | Minimisation des secrets | Recommandation du rapport | La seule couche absolue | Exige une architecture côté serveur |
 | Aspects juridiques et opérationnels | `generate_notice` | Le contrat et la traçabilité font ce que les octets ne peuvent pas | L'application est un processus juridique |
+
+Deux lignes ne sont pas ce qu'un produit de protection entend habituellement par elles, et ce
+projet ne prétend pas le contraire. La protection du contenu n'obfusque rien : elle met à zéro
+des plages d'octets que vous fournissez à la main, et, comme aucun lecteur ne produit de
+constatation dans cette couche, le chemin de l'audit vers le durcissement ne l'atteint jamais —
+vous devez nommer les plages vous-même. La minimisation des secrets n'est pas non plus une
+mesure que l'outil applique ; c'est la recommandation selon laquelle un jeton accessible par
+correspondance de motif n'aurait jamais dû être compilé, et la seule couche qui est absolue
+plutôt qu'une augmentation de coût.
 
 ## Limites connues
 
@@ -172,12 +194,14 @@ Trois limites ont été mesurées, et non théorisées :
 
 - **La recherche textuelle simple fonctionne toujours.** Les réécritures de longueur égale
   détruisent les enregistrements de métadonnées tels que les informations de build Go et les
-  tables de symboles ELF, mais le nom du module, la version du compilateur et les paramètres de
+  tables de symboles ELF. Mais le nom du module, la version du compilateur et les paramètres de
   build résident aussi dans les données en lecture seule et dans la table des noms de
   fonctions, là où le runtime Go les lit lui-même. Réécrire ces octets changerait le
   comportement à l'exécution : Anti-REA n'y touche pas, et quiconque passe `strings` sur un
-  binaire durci les récupère encore. Supprimez-les à la source avec des options de build
-  (`-trimpath`, `-ldflags="-s -w"`, `strip`).
+  binaire durci les récupère encore. Le rapport d'audit nomme les options de build qui les
+  suppriment à la source pour chaque constatation touchée : `-trimpath`, `-ldflags="-s -w"`,
+  `strip`. Il indique aussi ce que ces options coûtent elles-mêmes, de sorte que le
+  compromis est visible avant que vous ne reconstruisiez.
 - **Toute exposition n'a pas sa mesure d'atténuation.** Les tables d'imports PE, les faits
   d'en-tête ELF et les indicateurs de format du bytecode Python sont rapportés sans mesure
   d'atténuation, car le logiciel en a besoin pour fonctionner. L'audit le dit au lieu
@@ -186,10 +210,12 @@ Trois limites ont été mesurées, et non théorisées :
   familles d'identifiants aux formats publics. Un jeton au format privé lui est invisible, et
   un résultat vide ne prouve pas l'absence de secrets.
 
-La couverture des systèmes hôtes est elle aussi une limite mesurée : l'outil est écrit en
-Node.js pur, sans dépendance native, mais la suite de tests et les fixtures n'ont été
-exercées que sur Windows. macOS et Linux sont censés fonctionner et ne sont pas encore
-vérifiés.
+La couverture des systèmes hôtes est une limite mesurée dont la correction est en cours.
+L'outil est écrit en Node.js pur, sans dépendance native, mais la suite de tests et les
+fixtures n'ont jusqu'à présent été exercées qu'à la main sur Windows. Un flux de travail
+GitHub Actions exécute désormais les trois mêmes contrôles sur Ubuntu, macOS et Windows à
+chaque push. Tant que ce flux de travail n'est pas arrivé à son terme sur un commit,
+considérez macOS et Linux comme censés fonctionner plutôt que comme vérifiés.
 
 ## FAQ
 
@@ -201,7 +227,9 @@ complètes qui rejouent tous les contrôles de format, et `verify` fait échouer
 durcissement qui casse une structure dont vos utilisateurs dépendent. Tout ce qui changerait
 le comportement à l'exécution est ignoré, motif énoncé à l'appui, au lieu d'être tenté.
 Relancer `harden` sur un artefact déjà durci est une opération sans effet, qui ne signale
-aucun changement.
+aucun changement. Et comme aucune mesure au niveau des octets n'est complète, chaque entrée
+du résultat indique ce qu'elle laisse encore exposé — lisez cette ligne avant de déclarer
+une exécution terminée.
 
 </details>
 
@@ -303,9 +331,9 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-La suite actuelle compte 526 tests, tous réussis, ainsi que le contrôle d'enregistrement des
-empreintes de fixtures. Elle s'exécute sur Windows avec Node.js 22 et 24 ; les hôtes macOS et
-Linux n'ont pas encore été exercés.
+La suite actuelle compte 566 tests, tous réussis, ainsi que le contrôle d'enregistrement des
+empreintes de fixtures. La suite est exercée à la main sur Windows et par le flux de travail CI
+sur Ubuntu, macOS et Windows, sur Node.js 22 et 24.
 
 ## Contribution
 
