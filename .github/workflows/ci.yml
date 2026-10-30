@@ -1,0 +1,52 @@
+# 持续集成：在三个操作系统上跑同一套检查。
+#
+# 存在的理由：README 的"已知限制"里记着测试套件只在 Windows 上跑过，
+# 而项目的卖点是零依赖、本地运行、跨平台可用。这个工作流把"未验证"
+# 变成"每次推送都验证"——三个运行器跑的是同一套命令，任一平台失败都能立刻看到。
+#
+# 只跑仓库内的检查，不安装第三方依赖：package.json 的 dependencies 为空，
+# 装依赖只会引入供应链面，对零依赖项目没有意义。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # 允许在仓库主页手动触发，便于在临时主机上补跑。
+  workflow_dispatch:
+
+# 同一分支上的新推送取消尚未完成的旧运行，避免排队浪费运行器时间。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 不 fail-fast：一个平台失败不取消其余平台，要看到全部三个的结果。
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # engines 要求 Node 22 或更高。取最低支持版本与当前主版本两个：
+        # 最低版本保证声明的兼容性为真，主版本保证新版本上没有回归。
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 使用 Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 全量测试
+        run: node --test
+
+      - name: MCP 标准输入输出握手冒烟
+        run: node scripts/mcp-smoke.mjs
+
+      - name: 夹具摘要登记核对
+        run: node tests/fixtures/build.mjs --check
