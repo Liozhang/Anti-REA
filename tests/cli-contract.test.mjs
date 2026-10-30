@@ -87,6 +87,43 @@ test('audit 目标不存在时退出码为 2', async () => {
   assert.match(result.stderr, /目标不存在/);
 });
 
+test('布尔选项接受内联 true/false，其余取值报用法错误', async () => {
+  // 修复前布尔分支忽略内联值：--json=false 被当成 true，调用方得到相反行为且不报错。
+  const off = await runInProcess(['audit', SAMPLE_APP, '--json=false']);
+  assert.equal(off.code, 0, off.stderr);
+  assert.ok(!off.stdout.trimStart().startsWith('{'), '--json=false 必须输出人读文本');
+
+  const on = await runInProcess(['audit', SAMPLE_APP, '--json=true']);
+  assert.equal(on.code, 0, on.stderr);
+  assert.doesNotThrow(() => JSON.parse(on.stdout), '--json=true 必须输出 JSON');
+
+  const bad = await runInProcess(['audit', SAMPLE_APP, '--json=maybe']);
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /布尔选项 --json 只接受 true 或 false/);
+});
+
+test('取值选项把后一个选项当作取值时报缺少取值，不静默吞掉', async () => {
+  // 修复前 shift 不检查取值形态：--out --json 会生成一个名为“--json”的文件，
+  // 同时让 --json 静默失效。
+  const result = await runInProcess(['audit', SAMPLE_APP, '--out', '--json']);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /选项 --out 缺少取值/);
+});
+
+test('报告写出失败时报用法错误，不裸露调用栈', async () => {
+  // 修复前写出失败以裸文件系统异常上抛：折成退出码 1 并打印完整堆栈，
+  // 据退出码判断的调用方会把“报告没写成”误判成“复审未通过”。
+  const dir = await mkdtemp(join(tmpdir(), 'anti-rea-cli-out-'));
+  try {
+    const result = await runInProcess(['audit', SAMPLE_APP, '--json', '--out', dir]);
+    assert.equal(result.code, 2, '写出失败是用法错误，不是业务不通过');
+    assert.match(result.stderr, /无法写出报告文件/);
+    assert.ok(!result.stderr.includes('at async'), '不得向用户裸露调用栈');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('audit 对普通应用目录正常完成，退出码为 0，输出可被 JSON.parse', async () => {
   const result = await runCliSubprocess(['audit', SAMPLE_APP, '--json']);
   assert.equal(result.code, 0);

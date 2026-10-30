@@ -65,6 +65,9 @@ export function createTreeWarner(emit) {
 
 /**
  * 把报告文本写出到文件。目标路径位于 git 工作树内时先经警告器提示，同一路径只警告一次。
+ * 写出失败（路径是目录、父目录不存在、只读）折成用法错误：这是最常见的一类输入错误，
+ * 按裸文件系统异常上抛会被折算成退出码 1，让据退出码判断的调用方把“报告没写成”
+ * 误判成“复审未通过”，同时把内部堆栈抛给用户。
  * @param {string} outputPath 输出路径
  * @param {string} text 报告文本
  * @param {(outputPath: string) => Promise<boolean>} warnTree 警告器
@@ -73,7 +76,11 @@ export function createTreeWarner(emit) {
 export async function writeReportFile(outputPath, text, warnTree) {
   const resolved = resolve(outputPath);
   await warnTree(resolved);
-  await writeFile(resolved, text, 'utf8');
+  try {
+    await writeFile(resolved, text, 'utf8');
+  } catch (error) {
+    throw new UsageError(`无法写出报告文件：${resolved}`, { cause: String(error) });
+  }
   return resolved;
 }
 

@@ -81,6 +81,26 @@ export const GLOBAL_OPTIONS = Object.freeze({
 export const SUBCOMMANDS = Object.freeze(Object.keys(SUBCOMMAND_SPECS));
 
 /**
+ * 解析布尔选项的取值。省略内联值即置真；给出内联值必须是 true 或 false。
+ * 把 --json=false 当成 true，调用方会得到与请求相反的行为且不报错，
+ * 因此内联值只接受这两个词，其余取值报错。
+ * @param {string} name 选项名，用于错误消息
+ * @param {string | undefined} inlineValue 等号后跟的值；省略时为 undefined
+ * @param {string[]} errors 错误收集数组，就地追加
+ * @returns {boolean | null} 取值；取值非法时返回 null
+ */
+function booleanValueOf(name, inlineValue, errors) {
+  if (inlineValue === undefined || inlineValue === 'true') {
+    return true;
+  }
+  if (inlineValue === 'false') {
+    return false;
+  }
+  errors.push(`布尔选项 --${name} 只接受 true 或 false，收到 ${inlineValue}`);
+  return null;
+}
+
+/**
  * 解析命令行参数。
  * @param {readonly string[]} argv 进程参数，不含 node 与脚本路径
  * @returns {{ok: true, subcommand: string, positionals: string[], options: Record<string, string | boolean>, help: boolean, version: boolean} | {ok: false, errors: string[]}}
@@ -126,10 +146,15 @@ export function parseArgs(argv) {
       const name = equals === -1 ? arg.slice(2) : arg.slice(2, equals);
       const inlineValue = equals === -1 ? undefined : arg.slice(equals + 1);
       if (Object.hasOwn(GLOBAL_OPTIONS, name)) {
+        // 全局布尔选项同样接受内联 true/false：--help=false 不该被当成 --help。
+        const flag = booleanValueOf(name, inlineValue, errors);
+        if (flag === null) {
+          continue;
+        }
         if (name === 'help') {
-          help = true;
+          help = flag;
         } else {
-          version = true;
+          version = flag;
         }
         continue;
       }
@@ -139,13 +164,18 @@ export function parseArgs(argv) {
         continue;
       }
       if (kind === BOOLEAN) {
-        options[name] = true;
+        const flag = booleanValueOf(name, inlineValue, errors);
+        if (flag !== null) {
+          options[name] = flag;
+        }
         continue;
       }
       let value = inlineValue;
       if (value === undefined) {
         value = args.shift();
-        if (value === undefined) {
+        // 取到的是下一个选项：调用方漏了取值。把它当取值会生成一个名为“--json”的
+        // 输出文件，同时让后面的选项静默失效，因此按缺少取值处理。
+        if (value === undefined || value.startsWith('--')) {
           errors.push(`选项 --${name} 缺少取值`);
           continue;
         }

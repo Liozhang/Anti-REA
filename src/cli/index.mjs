@@ -79,7 +79,9 @@ export async function runCli(argv, io = {}) {
     }
     const described = describeError(error);
     err(`错误（${EXIT_CODE_LABELS[described.exitCode] ?? described.exitCode}）：${described.message}\n`);
-    if (!(error instanceof AntireaError) && error instanceof Error && error.stack !== undefined) {
+    // 内部异常的堆栈只在显式设置 ANTI_REA_DEBUG 时打印：堆栈里带仓库绝对路径，
+    // 抛给普通用户既读不懂也构成信息外泄。已知错误一律不打印，消息已经说清原因。
+    if (process.env.ANTI_REA_DEBUG !== undefined && !(error instanceof AntireaError) && error instanceof Error && error.stack !== undefined) {
       err(`${error.stack}\n`);
     }
     return described.exitCode;
