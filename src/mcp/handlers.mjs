@@ -2,9 +2,11 @@
 // 本文件只做协议适配：参数取自 tools/call，工作流一律走 src/cli/workflows.mjs，不另写一份逻辑。
 // 退出码到 MCP 结果的折算：
 //   0 成功          -> isError 为 false，报告作为文本内容返回
-//   3 拒否          -> isError 为 false，拒否报告带 omitted_reason，调用方可按需判断
 //   1 业务不通过    -> isError 为 true
 //   2 用法或输入错误 -> isError 为 true
+//   3 拒否          -> isError 为 true，拒否报告同样带回：status 为 refused，
+//                       omitted_reason 点名缺失的字段。拒绝不是成功——按成功信号返回，
+//                       代理会以为声明已经生成，而它一个字节都没写。
 
 import { resolve } from 'node:path';
 
@@ -90,7 +92,9 @@ export async function handleToolCall(params) {
       }
       return {
         content: [{ type: 'text', text }],
-        isError: false,
+        // 拒否按失败信号返回：报告连同 omitted_reason 一起送回，调用方既看得到
+        // 缺什么，也不会把拒否误判成一次成功的调用。
+        isError: true,
         structuredContent: report,
       };
     }

@@ -302,7 +302,10 @@ test('MCP generate_notice 在字段齐全时正常返回，缺失时返回含 om
     method: 'tools/call',
     params: { name: 'generate_notice', arguments: { template: 'license', policy: MISSING_SUBJECT_POLICY } },
   });
-  assert.equal(refused.result.isError, false, '拒否不是调用失败，报告里带 omitted_reason');
+  // 拒否按失败信号返回。此前这里断言 isError 为 false，理由是“拒否不是调用失败”；
+  // 但代理按成功信号收到一份并没有生成的声明，正是本项目反复修的那类
+  // “协议层看起来成功而实际没有”。报告连同 omitted_reason 一起送回，信息不减。
+  assert.equal(refused.result.isError, true, '拒否不是成功，按失败信号返回');
   const refusedReport = JSON.parse(refused.result.content[0].text);
   assert.equal(refusedReport.status, 'refused');
   assert.ok(refusedReport.omitted_reason.some((reason) => reason.includes('主体名称')));

@@ -69,8 +69,7 @@ Tre comandi vengono eseguiti in ordine, e l'ordine conta:
    l'originale resta intatto.
 
 Gli stessi tre flussi di lavoro sostengono gli strumenti MCP e la CLI, quindi un agente e un
-terminale ottengono risultati identici e codici di uscita identici: 0 per audit o protezione
-completati, 1 per verifica non superata, 2 per errore di utilizzo, 3 per rifiuto.
+terminale arrivano alle stesse conclusioni sullo stesso artefatto. I codici di uscita sono il contratto del terminale: 0 per audit o protezione completati, 1 per verifica non superata, 2 per errore di utilizzo, 3 per rifiuto. MCP non ha codici di uscita: 0 corrisponde a `isError: false`, con il report nel risultato, mentre 1, 2 e 3 corrispondono tutti a `isError: true` – un rifiuto non è un successo, e il suo report riporta ancora `status: "refused"` e il campo `omitted_reason` che nomina ogni campo mancante.
 
 ## Collega il tuo agente
 

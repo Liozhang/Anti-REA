@@ -599,6 +599,19 @@ test('MCP tools/call 对用法错误返回 isError，对拒否返回含 omitted_
     params: { name: 'audit_artifact', arguments: { path: 'definitely-not-here' } },
   });
   assert.equal(badTarget.result.isError, true);
+
+  // 拒否同样按失败信号返回：此前 isError 为 false，协议层看起来像成功，
+  // 代理会以为声明已经生成。报告连同 omitted_reason 一起送回，信息不减。
+  const refused = await server.handle({
+    jsonrpc: '2.0',
+    id: 5,
+    method: 'tools/call',
+    params: { name: 'generate_notice', arguments: { template: 'license' } },
+  });
+  assert.equal(refused.result.isError, true, '拒否不是成功，按失败信号返回');
+  const refusal = JSON.parse(refused.result.content[0].text);
+  assert.equal(refusal.status, 'refused');
+  assert.ok(refusal.omitted_reason.length > 0, '拒否报告要点名缺失的字段');
 });
 
 

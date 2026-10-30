@@ -79,7 +79,9 @@ test('tools/call 调用 generate_notice 在法律字段缺失时返回含 omitte
     method: 'tools/call',
     params: { name: 'generate_notice', arguments: { template: 'license' } },
   });
-  assert.equal(response.result.isError, false);
+  // 拒否按失败信号返回：此前 isError 为 false，协议层看起来像成功，代理会以为
+  // 声明已经生成。报告本身一个字段不少地送回，调用方看得到缺什么。
+  assert.equal(response.result.isError, true);
   const report = JSON.parse(response.result.content[0].text);
   assert.equal(report.status, 'refused');
   assert.ok(report.omitted_reason.length > 0);

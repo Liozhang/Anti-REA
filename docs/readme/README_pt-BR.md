@@ -68,9 +68,7 @@ Três comandos são executados em ordem, e a ordem importa:
    intacto.
 
 Os mesmos três fluxos de trabalho sustentam as ferramentas MCP e a CLI, então um agente e um
-terminal obtêm resultados idênticos e códigos de saída idênticos: 0 para uma auditoria ou
-execução de endurecimento concluída, 1 para uma verificação reprovada, 2 para erro de uso, 3 para
-recusa.
+terminal obtêm as mesmas conclusões sobre o mesmo artefato. Os códigos de saída são o contrato do terminal: 0 para uma auditoria ou execução de endurecimento concluída, 1 para uma verificação reprovada, 2 para erro de uso, 3 para recusa. O MCP não tem códigos de saída: 0 corresponde a `isError: false`, com o relatório no resultado, enquanto 1, 2 e 3 correspondem todos a `isError: true` – uma recusa não é um sucesso, e seu relatório continua trazendo `status: "refused"` e o campo `omitted_reason` que nomeia cada campo ausente.
 
 ## Conecte seu agente
 

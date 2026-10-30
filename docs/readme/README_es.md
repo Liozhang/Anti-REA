@@ -68,9 +68,7 @@ Tres comandos se ejecutan en orden, y el orden importa:
    revisión, y el original queda intacto.
 
 Los mismos tres flujos de trabajo sostienen las herramientas MCP y la interfaz de línea de
-comandos, de modo que un agente y una terminal obtienen resultados idénticos y códigos de
-salida idénticos: 0 para una auditoría o una ejecución de refuerzo completadas, 1 para una
-verificación fallida, 2 para un error de uso, 3 para una negativa.
+comandos, de modo que un agente y una terminal llegan a las mismas conclusiones sobre el mismo artefacto. Los códigos de salida son el contrato de la terminal: 0 para una auditoría o una ejecución de refuerzo completadas, 1 para una verificación fallida, 2 para un error de uso, 3 para una negativa. MCP no tiene códigos de salida: 0 se asigna a `isError: false`, con el informe en el resultado, mientras que 1, 2 y 3 se asignan todos a `isError: true`: una negativa no es un éxito, y su informe sigue llevando `status: "refused"` y el campo `omitted_reason` que nombra cada campo ausente.
 
 ## Conecta tu agente
 

@@ -64,9 +64,12 @@ Three commands run in order, and the order matters:
    it touches is exempted, everything else must still parse. A hardening run that breaks a
    required structure fails review, and the original is left untouched.
 
-The same three workflows back the MCP tools and the CLI, so an agent and a terminal get
-identical results and identical exit codes: 0 for a completed audit or hardening run, 1 for a
-failed verification, 2 for a usage error, 3 for a refusal.
+The same three workflows back the MCP tools and the CLI, so an agent and a terminal reach the
+same verdicts on the same artifact. The exit codes are the terminal's contract: 0 for a completed
+audit or hardening run, 1 for a failed verification, 2 for a usage error, 3 for a refusal. MCP has
+no exit codes: 0 maps to `isError: false` with the report in the result, while 1, 2 and 3 all map to
+`isError: true` — a refusal is not a success, and its report still carries `status: "refused"` and
+the `omitted_reason` naming every missing field.
 
 ## Install
 

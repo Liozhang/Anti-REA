@@ -69,9 +69,7 @@ Trois commandes s'exécutent dans l'ordre, et cet ordre importe :
    une structure requise échoue au contrôle, et l'original reste intact.
 
 Les trois mêmes flux de travail sous-tendent les outils MCP et l'interface en ligne de
-commande : un agent et un terminal obtiennent des résultats identiques et des codes de sortie
-identiques, 0 pour un audit ou un durcissement mené à son terme, 1 pour une vérification en
-échec, 2 pour une erreur d'utilisation, 3 pour un refus.
+commande : un agent et un terminal parviennent donc aux mêmes conclusions sur le même artéfact. Les codes de sortie sont le contrat du terminal : 0 pour un audit ou un durcissement mené à son terme, 1 pour une vérification en échec, 2 pour une erreur d'utilisation, 3 pour un refus. MCP n'a pas de codes de sortie : 0 correspond à `isError: false`, le rapport étant renvoyé dans le résultat, tandis que 1, 2 et 3 correspondent tous à `isError: true` – un refus n'est pas un succès, et son rapport porte encore `status: "refused"` ainsi que le champ `omitted_reason` qui nomme chaque champ manquant.
 
 ## Connecter votre agent
 

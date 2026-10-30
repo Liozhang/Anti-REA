@@ -69,9 +69,7 @@ Drei Befehle laufen in fester Reihenfolge ab, und die Reihenfolge ist wichtig:
    die Prüfung, und das Original bleibt unberührt.
 
 Dieselben drei Workflows liegen den MCP-Werkzeugen und der Kommandozeilenschnittstelle zugrunde.
-Ein Agent und ein Terminal erhalten damit identische Ergebnisse und identische Exit-Codes: 0 für
-einen abgeschlossenen Audit- oder Härtungslauf, 1 für eine fehlgeschlagene Verifikation, 2 für
-einen Anwendungsfehler, 3 für eine Ablehnung.
+Ein Agent und ein Terminal kommen damit bei demselben Artefakt zum selben Urteil. Die Exit-Codes sind der Vertrag des Terminals: 0 für einen abgeschlossenen Audit- oder Härtungslauf, 1 für eine fehlgeschlagene Verifikation, 2 für einen Anwendungsfehler, 3 für eine Ablehnung. MCP kennt keine Exit-Codes: 0 wird auf `isError: false` abgebildet, mit dem Bericht im Ergebnis, während 1, 2 und 3 alle auf `isError: true` abgebildet werden – eine Ablehnung ist kein Erfolg, und ihr Bericht trägt weiterhin `status: "refused"` sowie das `omitted_reason`, das jedes fehlende Feld benennt.
 
 ## Agenten anbinden
 
