@@ -23,6 +23,15 @@ export const TRUNCATION_MARK = '…[报表已达到策略字节上限，内容�
 export const TEXT_FINDING_LIMIT = 20;
 
 /**
+ * 人读文本逐条列出的限制说明条数上限，与发现同取 20。
+ * 限制说明此前一条上限都没有，而单个畸形制品就能刷出几千条：
+ * 实测一个声明 5000 个张量的 safetensors 文件，每个越界张量各出一条
+ * safetensors-interval-out-of-range，合计 4097 条。逐条全印时人读文本
+ * 同样无上限增长，而终端与日志接不住。超出部分只报条数并指向 JSON 输出。
+ */
+export const TEXT_LIMITATION_LIMIT = 20;
+
+/**
  * 序列化为 JSON 文本。
  * 超限时先去掉最占空间的 findings 与 limitations 明细，只保留汇总；
  * 仍然超限则在 UTF-8 字符边界处硬截断，末尾附截断标记。
@@ -177,8 +186,12 @@ export function renderTextReport(report) {
   const limitations = report?.limitations ?? [];
   if (limitations.length > 0) {
     lines.push(`限制说明：${limitations.length} 项`);
-    for (const limitation of limitations) {
+    const shownLimitations = limitations.slice(0, TEXT_LIMITATION_LIMIT);
+    for (const limitation of shownLimitations) {
       lines.push(`  ${limitation.code}：${limitation.message}`);
+    }
+    if (limitations.length > shownLimitations.length) {
+      lines.push(`  另有 ${limitations.length - shownLimitations.length} 项限制说明未在此列出，完整清单请用 JSON 输出`);
     }
   }
   if (report?.comparison !== undefined && report.comparison !== null) {

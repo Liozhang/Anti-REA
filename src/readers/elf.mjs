@@ -312,6 +312,7 @@ function parseSymbols(bytes, section, sections, big, is64) {
   }
   const strings = bytes.subarray(stringTable.offset, Math.min(bytes.length, stringTable.offset + stringTable.size));
   const read = (offset, size) => (big ? readUIntBE(bytes, offset, size) : readUIntLE(bytes, offset, size));
+  let skippedNames = 0;
   for (let index = 0; index < count; index += 1) {
     const base = section.offset + index * recordSize;
     if (base + (is64 ? 24 : 16) > bytes.length) {
@@ -319,19 +320,31 @@ function parseSymbols(bytes, section, sections, big, is64) {
       break;
     }
     const nameOffset = read(base, 4);
-    if (nameOffset === undefined) {
+    if (nameOffset === undefined || nameOffset <= 0 || nameOffset >= strings.length) {
       continue;
     }
-    if (names.length < SYMBOL_NAME_LIMIT && nameOffset > 0 && nameOffset < strings.length) {
-      let end = nameOffset;
-      while (end < strings.length && strings[end] !== 0) {
-        end += 1;
-      }
-      const name = strings.subarray(nameOffset, end);
-      if (isPrintableAscii(name)) {
-        names.push(name.toString('latin1'));
-      }
+    // 符号名清单已满之后不再取名，但要记账：不说的话，符号名被截断这件事
+    // 在报告里看不出来，而报告里的摘录看起来就像符号表只有这么几个名字。
+    if (names.length >= SYMBOL_NAME_LIMIT) {
+      skippedNames += 1;
+      continue;
     }
+    let end = nameOffset;
+    while (end < strings.length && strings[end] !== 0) {
+      end += 1;
+    }
+    const name = strings.subarray(nameOffset, end);
+    if (isPrintableAscii(name)) {
+      names.push(name.toString('latin1'));
+    }
+  }
+  if (skippedNames > 0) {
+    limitations.push(
+      limitation(
+        'elf-symbol-name-limit',
+        `符号表 ${section.name} 的可取符号名数超过登记上限 ${SYMBOL_NAME_LIMIT}，符号名清单只登记前 ${SYMBOL_NAME_LIMIT} 个，其余 ${skippedNames} 个本次没有取名`,
+      ),
+    );
   }
   return { count, names, limitations };
 }
@@ -397,6 +410,16 @@ async function readElf(context) {
   headerFinding.detail.programHeaders = programHeaderFacts.slice(0, PROGRAM_HEADER_LIMIT);
   if (sectionNames.length > SECTION_NAME_LIMIT) {
     limitations.push(limitation('elf-section-name-limit', `节数 ${sectionNames.length} 超过登记上限 ${SECTION_NAME_LIMIT}，节名清单只登记前 ${SECTION_NAME_LIMIT} 个`));
+  }
+  // 程序头清单登记的是 NOTE 段，与节名清单同样按上限截断，截断同样要留声：
+  // 少了这一条，段数超过上限的文件与没超的文件在报告里分辨不出。
+  if (programHeaderFacts.length > PROGRAM_HEADER_LIMIT) {
+    limitations.push(
+      limitation(
+        'elf-program-header-limit',
+        `程序头清单登记的 NOTE 段数 ${programHeaderFacts.length} 超过登记上限 ${PROGRAM_HEADER_LIMIT}，只登记前 ${PROGRAM_HEADER_LIMIT} 个`,
+      ),
+    );
   }
 
   // note：段内与节内各扫一遍，按名称与类型登记。
@@ -466,7 +489,7 @@ async function readElf(context) {
         },
         reader: 'elf',
         readerLimitation:
-          '符号名按字符串表逐条取出，只列前若干个；剥离符号只让按名检索失败，地址级枚举仍可用，运行期动态符号不在覆写范围',
+          '符号名按字符串表逐条取出，每个符号表只列前 12 个；剥离符号只让按名检索失败，地址级枚举仍可用，运行期动态符号不在覆写范围',
         mitigation: 'metadata.elf-symtab-clear',
         detail: {
           section: section.name,

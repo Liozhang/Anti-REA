@@ -106,6 +106,9 @@ function parseSlice(bytes, base, sliceLabel) {
     uuid: null,
     entryPoint: null,
     loadCommandKinds: [],
+    // 解析过程中攒下的说明，由读取器入口转成限制说明。挂在 data 上而不是改返回形状：
+    // parseFat 只取 parsed.data，改形状会漏掉胖二进制分片那一支。
+    problems: [],
   };
   if (data.cputype === undefined || data.ncmds === undefined || data.sizeofcmds === undefined) {
     return { ok: false, reason: `${sliceLabel}头字段读取越界` };
@@ -113,6 +116,7 @@ function parseSlice(bytes, base, sliceLabel) {
   const commandBase = base + headerSize;
   const commandEnd = Math.min(bytes.length, commandBase + data.sizeofcmds);
   let position = commandBase;
+  const declaredOverCap = data.ncmds > MAX_LOAD_COMMANDS;
   for (let index = 0; index < Math.min(data.ncmds, MAX_LOAD_COMMANDS); index += 1) {
     if (position + 8 > commandEnd) {
       break;
@@ -178,6 +182,15 @@ function parseSlice(bytes, base, sliceLabel) {
       data.entryPoint = read(position + 8, 8);
     }
     position += cmdsize;
+  }
+  // 命令数按登记上限截断，截断必须留声：一个声明 42 亿条命令的文件和一个声明
+  // 4096 条的文件，解析结果完全相同，不说的话报告分辨不出这两者。
+  // 报实际解析条数而不是上限本身：命令区提前读完时解析条数会少于上限，
+  // 写成“只解析前 4096 条”就成了假话。
+  if (declaredOverCap) {
+    data.problems.push(
+      `加载命令数声明 ${data.ncmds} 条，超过登记上限 ${MAX_LOAD_COMMANDS}，本次解析 ${data.loadCommandKinds.length} 条，其余命令没有解析`,
+    );
   }
   return { ok: true, data };
 }
@@ -272,6 +285,9 @@ async function readMachO(context) {
       limitations.push(limitation('macho-slice-unparsable', `${slice.sliceLabel}解析失败：${slice.unparsable}`));
       continue;
     }
+    for (const problem of slice.problems ?? []) {
+      limitations.push(limitation('macho-load-command-limit', `${slice.sliceLabel}${problem}`));
+    }
     const cpuLabel = CPU_TYPES[slice.cputype] ?? String(slice.cputype);
     const filetypeLabel = FILE_TYPES[slice.filetype] ?? String(slice.filetype);
     findings.push(
@@ -286,7 +302,8 @@ async function readMachO(context) {
           excerpt: `${slice.bits} 位 ${cpuLabel} ${filetypeLabel} ${slice.ncmds} 条加载命令`,
         },
         reader: 'mach-o',
-        readerLimitation: '只解析 Mach-O 头与加载命令声明的字段，不反汇编、不恢复源码；头字段可被伪造，声明与真实行为未必一致',
+        readerLimitation:
+          '只解析 Mach-O 头与加载命令声明的字段，不反汇编、不恢复源码；头字段可被伪造，声明与真实行为未必一致；加载命令数上限 4096 条，超出部分没有解析',
         mitigation: null,
         detail: {
           fat: isFat,
