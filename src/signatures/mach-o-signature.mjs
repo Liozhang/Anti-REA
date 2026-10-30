@@ -31,9 +31,9 @@ function readU32(buffer, offset, swapped) {
 }
 
 /**
- * 识别 Mach-O 魔数，判定位数与字节序。
+ * 识别 Mach-O 魔数，判定位数与字节序；胖二进制 additionally 带位数，供分片表布局选择。
  * @param {Buffer} buffer
- * @returns {{fat: true} | {fat: false, bits: 32 | 64, swapped: boolean} | null}
+ * @returns {{fat: true, bits: 32 | 64} | {fat: false, bits: 32 | 64, swapped: boolean} | null}
  */
 function readMagic(buffer) {
   if (buffer.length < 4) {
@@ -52,9 +52,12 @@ function readMagic(buffer) {
   if (le === 0xcffaedfe) {
     return { fat: false, bits: 64, swapped: true };
   }
-  // 胖二进制头按大端存储；以小端读出为 0xbebafeca。
+  // 胖二进制头按大端存储；以小端读出为 0xbebafeca（32 位）或 0xbfbafeca（64 位）。
   if (le === 0xbebafeca) {
-    return { fat: true };
+    return { fat: true, bits: 32 };
+  }
+  if (le === 0xbfbafeca) {
+    return { fat: true, bits: 64 };
   }
   return null;
 }
@@ -145,14 +148,18 @@ export function analyzeMacho(buffer, policy = {}) {
       };
     }
     const nfat = buffer.readUInt32BE(4);
+    // 分片项布局随位数：64 位 32 字节，offset 与 size 各八字节；
+    // 按 32 位布局读会把偏移取成高 4 字节，对 offset 大于 4 GiB 的分片恒为零。
+    const fatIs64 = magic.bits === 64;
+    const archBytes = fatIs64 ? 32 : 20;
     let archPosition = 8;
     for (let index = 0; index < nfat; index += 1) {
-      if (archPosition + 20 > buffer.length) {
+      if (archPosition + archBytes > buffer.length) {
         limitations.push(`第 ${index + 1} 个 fat_arch 越界，停止枚举`);
         break;
       }
-      const sliceOffset = buffer.readUInt32BE(archPosition + 8);
-      const sliceSize = buffer.readUInt32BE(archPosition + 12);
+      const sliceOffset = fatIs64 ? Number(buffer.readBigUInt64BE(archPosition + 8)) : buffer.readUInt32BE(archPosition + 8);
+      const sliceSize = fatIs64 ? Number(buffer.readBigUInt64BE(archPosition + 16)) : buffer.readUInt32BE(archPosition + 12);
       const sliceMagic = readMagic(buffer.subarray(sliceOffset, sliceOffset + sliceSize));
       let sliceResult;
       if (sliceMagic === null || sliceMagic.fat) {
@@ -164,7 +171,7 @@ export function analyzeMacho(buffer, policy = {}) {
       if (sliceResult.limitation !== null) {
         limitations.push(sliceResult.limitation);
       }
-      archPosition += 20;
+      archPosition += archBytes;
     }
   } else {
     const sliceResult = analyzeSlice(buffer, 0, magic);

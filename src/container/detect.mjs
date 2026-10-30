@@ -30,8 +30,17 @@ const FAT_HEADER_BYTES = 8;
 /** 胖二进制单个分片项长度：cputype、cpusubtype、offset、size、align 各四字节，共二十字节。 */
 const FAT_ARCH_BYTES = 20;
 
+/** 64 位胖二进制分片项长度：offset 与 size 各八字节，共三十二字节。 */
+const FAT_ARCH_64_BYTES = 32;
+
+/** 64 位胖二进制魔数，大端解释；不与 Java 类文件魔数混用。 */
+const FAT_MAGIC_64 = 0xcafebabf;
+
 /** Mach-O 胖二进制魔数与 Java 类文件魔数相同，需要显式记录这一歧义。 */
 const MACH_O_FAT_AMBIGUITY = '魔数 CAFEBABE 也用于 Java 类文件，已按分片表结构判别为胖二进制';
+
+/** 64 位胖二进制魔数没有 Java 类文件歧义，记录判定依据。 */
+const FAT_MAGIC_64_NOTE = '魔数 CAFEBABF 是 64 位胖二进制专用，按分片表结构判别为胖二进制';
 
 /** 命中 CAFEBABE 但分片表不符合胖二进制结构时的归类说明。 */
 const JAVA_CLASS_NOTE = '魔数 CAFEBABE 也用于 Java 类文件，分片数或首个分片头不符合胖二进制结构，判为范围外容器';
@@ -69,6 +78,7 @@ const CONTAINER_TABLE = [
   { type: 'mach-o', label: 'Mach-O', magic: [0xfe, 0xed, 0xfa, 0xce], offset: 0 },
   { type: 'mach-o', label: 'Mach-O', magic: [0xfe, 0xed, 0xfa, 0xcf], offset: 0 },
   { type: 'mach-o-fat', label: 'Mach-O 胖二进制', magic: [0xca, 0xfe, 0xba, 0xbe], offset: 0, confirm: 'confirmFat', note: MACH_O_FAT_AMBIGUITY },
+  { type: 'mach-o-fat', label: 'Mach-O 胖二进制（64 位）', magic: [0xca, 0xfe, 0xba, 0xbf], offset: 0, confirm: 'confirmFat', note: FAT_MAGIC_64_NOTE },
   { type: 'mach-o-fat', label: 'Mach-O 胖二进制', magic: [0xbe, 0xba, 0xfe, 0xca], offset: 0 },
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x03, 0x04], offset: 0 },
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x05, 0x06], offset: 0 },
@@ -170,13 +180,16 @@ function confirmFat(prefix, fileSize) {
     // 分片数为零或超出常见范围。Java 类文件的主版本号落在这个位置，据此排除。
     return 'refuted';
   }
-  if (prefix.length < FAT_HEADER_BYTES + FAT_ARCH_BYTES) {
+  // 布局随魔数区分：64 位分片项的 offset 与 size 各八字节，窗口也要按 32 字节检查。
+  const is64 = prefix.readUInt32BE(0) === FAT_MAGIC_64;
+  if (prefix.length < FAT_HEADER_BYTES + (is64 ? FAT_ARCH_64_BYTES : FAT_ARCH_BYTES)) {
     // 分片数合理，但读不到首个分片项：窗口被截断。
     return 'undetermined';
   }
   const cputype = prefix.readUInt32BE(FAT_HEADER_BYTES);
-  const offset = prefix.readUInt32BE(FAT_HEADER_BYTES + 8);
-  const size = prefix.readUInt32BE(FAT_HEADER_BYTES + 12);
+  // offset 与 size 的宽度随位数：64 位按八字节读，再转成数值与文件长度比较。
+  const offset = is64 ? Number(prefix.readBigUInt64BE(FAT_HEADER_BYTES + 8)) : prefix.readUInt32BE(FAT_HEADER_BYTES + 8);
+  const size = is64 ? Number(prefix.readBigUInt64BE(FAT_HEADER_BYTES + 16)) : prefix.readUInt32BE(FAT_HEADER_BYTES + 12);
   if (cputype === 0) {
     // 每个分片都必须声明处理器类型，零不是合法的 cputype。
     return 'refuted';

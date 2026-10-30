@@ -186,7 +186,7 @@ function parseSlice(bytes, base, sliceLabel) {
   // 命令数按登记上限截断，截断必须留声：一个声明 42 亿条命令的文件和一个声明
   // 4096 条的文件，解析结果完全相同，不说的话报告分辨不出这两者。
   // 报实际解析条数而不是上限本身：命令区提前读完时解析条数会少于上限，
-  // 写成“只解析前 4096 条”就成了假话。
+  // 写成"只解析前 4096 条"就成了假话。
   if (declaredOverCap) {
     data.problems.push(
       `加载命令数声明 ${data.ncmds} 条，超过登记上限 ${MAX_LOAD_COMMANDS}，本次解析 ${data.loadCommandKinds.length} 条，其余命令没有解析`,
@@ -197,6 +197,8 @@ function parseSlice(bytes, base, sliceLabel) {
 
 /**
  * 解析胖二进制分片表并逐个解析分片。
+ * 分片项布局按位数区分：32 位 fat_arch 为 20 字节，offset 与 size 各 4 字节；
+ * 64 位 fat_arch_64 为 32 字节，offset 与 size 各 8 字节。
  * @param {Buffer} bytes
  * @returns {{ok: true, slices: Array<Record<string, unknown>>, fat: true} | {ok: false, reason: string}}
  */
@@ -210,14 +212,17 @@ function parseFat(bytes) {
   if (count === undefined || count > 64) {
     return { ok: false, reason: '胖二进制分片数读取失败或超出合理范围' };
   }
-  const entrySize = spec.bits === 64 ? 28 : 20;
+  const is64 = spec.bits === 64;
+  const entrySize = is64 ? 32 : 20;
   const slices = [];
   for (let index = 0; index < count; index += 1) {
     const base = 8 + index * entrySize;
     if (base + entrySize > bytes.length) {
       break;
     }
-    const offset = readUIntBE(bytes, base + 8, 4);
+    // 偏移字段宽度随位数：64 位按 8 字节读，按 4 字节读会取到高 4 字节，
+    // 对 offset 大于 4 GiB 的分片恒为零，把所有分片都送到文件头去解析。
+    const offset = readUIntBE(bytes, base + 8, is64 ? 8 : 4);
     if (offset === undefined) {
       continue;
     }

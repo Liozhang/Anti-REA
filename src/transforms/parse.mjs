@@ -312,14 +312,17 @@ export function parseMachOStructure(bytes) {
     if (count === undefined || count > 64) {
       return { ok: false, reason: '胖二进制分片数读取失败或超出合理范围' };
     }
-    const entrySize = fatSpec.bits === 64 ? 28 : 20;
+    // 布局随位数：64 位分片项 32 字节，offset 字段 8 字节；按 32 位布局读会把
+    // 偏移取成高 4 字节，对 offset 大于 4 GiB 的分片恒为零。
+    const is64 = fatSpec.bits === 64;
+    const entrySize = is64 ? 32 : 20;
     const slices = [];
     for (let index = 0; index < count; index += 1) {
       const base = 8 + index * entrySize;
       if (base + entrySize > bytes.length) {
         break;
       }
-      const offset = readUInt(bytes, base + 8, 4, true);
+      const offset = readUInt(bytes, base + 8, is64 ? 8 : 4, true);
       if (offset === undefined) {
         continue;
       }
