@@ -213,7 +213,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-目前測試套件共 592 項測試，全部通過，外加測試資料摘要登記核對。套件在 Windows 上以手動方式執行過，並在 Ubuntu、macOS 與 Windows 上由 CI 工作流程執行過，Node.js 版本為 22 與 24。
+目前測試套件共 595 項測試，全部通過，外加測試資料摘要登記核對。套件在 Windows 上以手動方式執行過，並在 Ubuntu、macOS 與 Windows 上由 CI 工作流程執行過，Node.js 版本為 22 與 24。
 
 ## 參與貢獻
 

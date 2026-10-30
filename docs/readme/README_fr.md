@@ -329,7 +329,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-La suite actuelle compte 592 tests, tous réussis, ainsi que le contrôle d'enregistrement des
+La suite actuelle compte 595 tests, tous réussis, ainsi que le contrôle d'enregistrement des
 empreintes de fixtures. La suite est exercée à la main sur Windows et par le flux de travail CI
 sur Ubuntu, macOS et Windows, sur Node.js 22 et 24.
 
