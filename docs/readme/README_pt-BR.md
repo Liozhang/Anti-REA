@@ -315,7 +315,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-A suíte atual tem 566 testes, todos passando, mais a verificação de registro de digest dos
+A suíte atual tem 592 testes, todos passando, mais a verificação de registro de digest dos
 fixtures. A suíte é exercitada manualmente no Windows e pelo fluxo de trabalho de CI no Ubuntu,
 macOS e Windows, em Node.js 22 e 24.
 

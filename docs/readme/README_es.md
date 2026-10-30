@@ -325,7 +325,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-El conjunto actual tiene 566 pruebas, todas pasan, más la comprobación de registro de resúmenes
+El conjunto actual tiene 592 pruebas, todas pasan, más la comprobación de registro de resúmenes
 de los fixtures. El conjunto se ejecuta a mano en Windows y mediante el flujo de trabajo de CI
 en Ubuntu, macOS y Windows, con Node.js 22 y 24.
 

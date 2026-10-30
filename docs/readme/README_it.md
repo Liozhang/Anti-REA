@@ -319,7 +319,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-La suite attuale è di 566 test, tutti superati, più il controllo di registrazione dei digest
+La suite attuale è di 592 test, tutti superati, più il controllo di registrazione dei digest
 delle fixture. La suite viene esercitata a mano su Windows e dal flusso di lavoro CI su Ubuntu,
 macOS e Windows, su Node.js 22 e 24.
 

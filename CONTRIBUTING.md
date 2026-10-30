@@ -20,10 +20,10 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-Every check must pass before a change is ready. The suite currently stands at 560
+Every check must pass before a change is ready. The suite currently stands at 592
 tests, all passing, plus the MCP smoke handshake and the fixture digest check.
 
-上述检查全部通过，一项改动才算就绪。当前套件 566 项测试全部通过，外加 MCP 冒烟握手与夹具摘要核对。
+上述检查全部通过，一项改动才算就绪。当前套件 592 项测试全部通过，外加 MCP 冒烟握手与夹具摘要核对。
 
 ## Checks that gate a change / 改动门禁
 

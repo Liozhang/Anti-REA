@@ -294,7 +294,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-The current suite is 566 tests, all passing, plus the fixture digest registration check.
+The current suite is 592 tests, all passing, plus the fixture digest registration check.
 The suite is exercised on Windows by hand and on Ubuntu, macOS, and Windows by the CI
 workflow, on Node.js 22 and 24.
 

@@ -214,7 +214,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-현재 스위트는 566개 테스트로, 모두 통과하며, 여기에 픽스처 다이제스트 등록 점검이 추가된다. 이 스위트는 Windows에서 수동으로 실행되었고, Ubuntu, macOS, Windows에서는 CI 워크플로로 실행되었다. Node.js는 22와 24이다.
+현재 스위트는 592개 테스트로, 모두 통과하며, 여기에 픽스처 다이제스트 등록 점검이 추가된다. 이 스위트는 Windows에서 수동으로 실행되었고, Ubuntu, macOS, Windows에서는 CI 워크플로로 실행되었다. Node.js는 22와 24이다.
 
 ## 기여하기
 

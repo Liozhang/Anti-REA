@@ -318,7 +318,7 @@ node scripts/mcp-smoke.mjs
 node tests/fixtures/build.mjs --check
 ```
 
-現在のスイートは 566 個のテストで、すべて成功しています。あわせて、フィクスチャの
+現在のスイートは 592 個のテストで、すべて成功しています。あわせて、フィクスチャの
 ダイジェスト登録のチェックも行われます。スイートは Windows 上では手作業で実行され、
 Ubuntu、macOS、Windows 上では CI ワークフローによって実行されます。Node.js は
 22 と 24 です。
