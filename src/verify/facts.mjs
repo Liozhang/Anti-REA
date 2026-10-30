@@ -573,9 +573,10 @@ function inspectMachoFat(bytes) {
   }
   // 胖二进制头按大端存储；以小端读出为 0xbebafeca。64 位魔数 CAFEBABF 读出为
   // 0xbfbafeca，分片项布局随位数区分：offset 与 size 各八字节。
+  // 字节序反转的头（读出为 0xcafebabe）不是真实格式，检测层已不认领，这里同样不收。
   const fatMagic = bytes.readUInt32LE(0);
   const is64 = fatMagic === 0xbfbafeca;
-  if (fatMagic !== 0xbebafeca && !is64 && fatMagic !== 0xcafebabe) {
+  if (fatMagic !== 0xbebafeca && !is64) {
     return envelope('mach-o-fat', { parseable: false, reason: '魔数不是 Mach-O 胖二进制', structures }, facts);
   }
   facts['mach-o-fat.fat-header'] = ok('胖二进制头魔数与 nfat_arch 可读');

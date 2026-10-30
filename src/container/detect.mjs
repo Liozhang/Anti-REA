@@ -79,7 +79,10 @@ const CONTAINER_TABLE = [
   { type: 'mach-o', label: 'Mach-O', magic: [0xfe, 0xed, 0xfa, 0xcf], offset: 0 },
   { type: 'mach-o-fat', label: 'Mach-O 胖二进制', magic: [0xca, 0xfe, 0xba, 0xbe], offset: 0, confirm: 'confirmFat', note: MACH_O_FAT_AMBIGUITY },
   { type: 'mach-o-fat', label: 'Mach-O 胖二进制（64 位）', magic: [0xca, 0xfe, 0xba, 0xbf], offset: 0, confirm: 'confirmFat', note: FAT_MAGIC_64_NOTE },
-  { type: 'mach-o-fat', label: 'Mach-O 胖二进制', magic: [0xbe, 0xba, 0xfe, 0xca], offset: 0 },
+  // 字节序反转的胖二进制头（BE BA FE CA，即 FAT_CIGAM）刻意不收：磁盘上的胖二进制
+  // 一律大端存放，反转只发生在用错字节序去读的时候，不是真实格式。此前这一条没有
+  // confirm 直接判为胖二进制，读取器又不认它，最后报“魔数不是胖二进制魔数”，
+  // 复审对一个根本不是胖二进制的文件判失败。不认领比认领了读不了诚实。
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x03, 0x04], offset: 0 },
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x05, 0x06], offset: 0 },
   { type: 'zip', label: 'ZIP', magic: [0x50, 0x4b, 0x07, 0x08], offset: 0 },

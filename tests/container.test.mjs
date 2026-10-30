@@ -235,6 +235,34 @@ test('CAFEBABF 判为 64 位胖二进制，分片项按 32 字节布局读取', 
   assert.equal(truncated.label, '未判定');
 });
 
+test('字节序反转的胖二进制头不再被认领：判范围外，复审不误报失败', async () => {
+  // 磁盘上的胖二进制一律大端存放，BE BA FE CA 只发生在用错字节序去读的时候，
+  // 不是真实格式。此前检测层无确认地判它为胖二进制，读取器又不认，复审对一个
+  // 根本不是胖二进制的文件判失败（退出码 1）。现在不认领：判范围外，复审放行。
+  const bytes = Buffer.alloc(4096, 0);
+  bytes[0] = 0xbe;
+  bytes[1] = 0xba;
+  bytes[2] = 0xfe;
+  bytes[3] = 0xca;
+  bytes.writeUInt32BE(1, 4);
+
+  const detected = detectContainer(bytes, bytes.length);
+  assert.equal(detected.type, 'unsupported', '字节序反转的头不是受支持格式');
+
+  const dir = await mkdtemp(join(tmpdir(), 'anti-rea-container-cigam-'));
+  try {
+    const path = join(dir, 'cigam-fat.bin');
+    await writeFile(path, bytes);
+    const result = await runCli(['verify', path, '--json']);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, 'passed');
+    assert.deepEqual(report.checks, [], '范围外容器没有可复审的结构，不出检查记录');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('复审对 Java 类文件不再失败：范围外条目不进入结构复审', async () => {
   const path = fixturePath('unsupported/java-class.class');
   const result = await runCli(['verify', path, '--json']);
