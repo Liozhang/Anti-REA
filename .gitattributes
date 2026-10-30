@@ -1,0 +1,7 @@
+# 行尾规则：文本夹具锁定为 LF。
+#
+# 存在的理由：tests/fixtures/manifest.json 按 LF 行尾登记每个夹具的 sha256，
+# 而 Windows 上 git 默认把检出的文本转成 CRLF。一旦行尾被转换，
+# 摘要就对不上，fixtures-stability 用例会误报"夹具被动过"。
+# 这个项目现在有三个操作系统的持续集成，行尾必须不随平台变化。
+tests/fixtures/sample-app/** text eol=lf
