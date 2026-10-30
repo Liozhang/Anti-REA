@@ -69,6 +69,9 @@ export function scanTokens(bytes, options = {}) {
           id: pattern.id,
           label: pattern.label,
           offset,
+          // 匹配长度单独带一份：摘录会被净化并截到上限，字节区间不能按摘录长度算，
+          // 否则超过上限的长令牌给出的区间比真实匹配短一截。
+          matchLength: match[0].length,
           excerpt: sanitizeExcerpt(bytes.subarray(offset, offset + match[0].length), EXCERPT_MAX_CHARS),
           severity: pattern.severity,
         });
@@ -85,7 +88,7 @@ export function scanTokens(bytes, options = {}) {
 
 /**
  * 把令牌命中转成发现。字节来源可以是原始字节，也可以是解压后的条目内容。
- * @param {{hits: Array<{id: string, label: string, offset: number, excerpt: string, severity: string}>}} scan 扫描结果
+ * @param {{hits: Array<{id: string, label: string, offset: number, matchLength: number, excerpt: string, severity: string}>}} scan 扫描结果
  * @param {{path: string, reader: string, baseOffset?: number, source?: string}} context
  * @returns {Array<Record<string, unknown>>}
  */
@@ -99,7 +102,8 @@ export function tokenFindings(scan, context) {
       category: `token-${hit.id}`,
       evidence: {
         path: context.path,
-        byteRange: [baseOffset + hit.offset, baseOffset + hit.offset + hit.excerpt.length],
+        // 区间终点按匹配长度算，不按摘录长度：摘录截到 96 字符，长令牌会算短。
+        byteRange: [baseOffset + hit.offset, baseOffset + hit.offset + hit.matchLength],
         excerpt: hit.excerpt,
       },
       reader: context.reader,

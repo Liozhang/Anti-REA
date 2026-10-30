@@ -24,7 +24,7 @@ import { pycReader } from '../src/readers/pyc.mjs';
 import { overwriteTokenPlaceholder } from '../src/transforms/equal-length.mjs';
 import { safetensorsReader } from '../src/readers/safetensors.mjs';
 import { zipReader } from '../src/readers/zip.mjs';
-import { scanTokens, TOKEN_PATTERNS } from '../src/readers/scan.mjs';
+import { scanTokens, TOKEN_PATTERNS, tokenFindings } from '../src/readers/scan.mjs';
 import { CONTAINER_FIXTURES } from './helpers/container-fixtures.mjs';
 import { buildElf64, buildSymbols, SHT, u32be, u32le } from './helpers/elf-fixture.mjs';
 import { READER_REGISTRY, capabilityBoundaryFor } from '../src/readers/index.mjs';
@@ -748,6 +748,21 @@ test('令牌模式不匹配许可证样例文本', async () => {
   const scan = scanTokens(license);
   assert.equal(scan.hits.length, 0, `许可证文本被误报：${JSON.stringify(scan.hits)}`);
   assert.equal(scan.complete, true);
+});
+
+test('长令牌的字节区间按匹配长度算，不按截断后的摘录长度', () => {
+  // PyPI 令牌的模式匹配长 120 字节，超过摘录上限 96 字符。修复前区间终点按
+  // 摘录长度算，报告出的区间比真实匹配短一截，而摘录只是给人看的显示值。
+  const token = `pypi-AgEIcHlwaS5vcmc${'Z'.repeat(100)}`;
+  const bytes = Buffer.concat([Buffer.alloc(64, 0x00), Buffer.from(token, 'latin1'), Buffer.alloc(64, 0x00)]);
+  const scan = scanTokens(bytes);
+  const hit = scan.hits.find((item) => item.id === 'pypi-token');
+  assert.notEqual(hit, undefined, 'PyPI 长令牌应被检出');
+  assert.equal(hit.matchLength, 120);
+  assert.ok(hit.excerpt.length < 120, '摘录仍按上限截断，供人读');
+
+  const findings = tokenFindings(scan, { path: 'app.bin', reader: 'pyc' });
+  assert.deepEqual(findings[0].evidence.byteRange, [64, 64 + 120], '字节区间必须覆盖整个匹配');
 });
 
 test('令牌模式命中植入的测试令牌', () => {
