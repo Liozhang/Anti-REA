@@ -2,10 +2,11 @@
 // 全部读取在进程内完成：不执行目标代码、不附加进程、不发起网络请求。
 // 资源超限时产部分结果并附限制说明，进程不失败不超时。
 //
-// 引擎对读取器输出的三件事负责：
+// 引擎对读取器输出的四件事负责：
 //   1. 归组   按 layer-defs 的七层词表归组，按层与严重度汇总
 //   2. 把关   每条发现先过 assertFindingVocabulary，词表外取值转成限制说明而不是混进报告
 //   3. 编号   汇总前按层顺序编号，编号在报告内唯一，可被施加记录引用
+//   4. 挂边界 汇总前把缓解措施的残留风险与源头解法挂到发现上，让报告自己说清“施加后还剩下什么”
 // 此外还负责识别阶段的遗漏：identifyArtifact 跳过的条目（不可读等原因）没有进入 entries，
 // 引擎逐条把它们转成限制说明，口径与复审侧 verify-entry-skipped 一致。
 // 少了这一步，报告里只会剩下“没有暴露”，部分结果就冒充了完整结论。
@@ -14,6 +15,7 @@ import { NotImplementedError, UsageError } from '../errors.mjs';
 import { identifyArtifact } from '../container/identify.mjs';
 import { isLayerEnabled } from '../policy/schema.mjs';
 import { capabilityBoundaryFor, readersForContainer } from '../readers/index.mjs';
+import { residualRiskFor, sourceFixFor } from '../transforms/index.mjs';
 import { assertFindingVocabulary, numberFindings, summarizeFindings } from './finding.mjs';
 
 /** 审计报告模式版本。 */
@@ -177,6 +179,16 @@ export async function auditArtifact(target, options = {}) {
   // 汇总前编号：编号按层内递增，读取顺序确定（目录条目按路径排序、读取器按登记顺序），
   // 因此同一制品两次审计得到同一组编号。
   numberFindings(findings);
+
+  // 汇总前把缓解措施的真实边界挂到发现上。用户在审计阶段就要决定走哪条路：
+  // 等长覆写保住文件长度与偏移但碰不得运行期字节，源头解法能让记录整个消失但要重新构建。
+  // 两句话都取自 transforms 登记表，读取器不各写一份，也不让它们只活在文档里——
+  // 只报“建议施加某项措施”而不说“施加后还剩下什么”，报告就在冒充完整结论。
+  for (const finding of findings) {
+    const mitigationId = typeof finding.mitigation === 'string' ? finding.mitigation : null;
+    finding.residualRisk = mitigationId === null ? null : residualRiskFor(mitigationId);
+    finding.sourceFix = mitigationId === null ? null : sourceFixFor(mitigationId);
+  }
 
   const summary = summarizeFindings(findings);
   const capabilityBoundaries = [...boundaryIndex.values()];

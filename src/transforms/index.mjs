@@ -67,6 +67,126 @@ const TRANSFORM_KINDS = Object.freeze({
   'secret.token-placeholder-overwrite': 'equal-length-overwrite',
 });
 
+/**
+ * 缓解措施编号到残留风险的映射。
+ * 残留风险回答"这项措施做不到什么"：等长覆写保住了文件长度与全部偏移，
+ * 也因此碰不得运行期自己要读的字节；读者换一种检索方式，事实照旧在手。
+ * 写在登记表里而不是只写在文档里，是为了让施加结果能把这句话原样带给调用方——
+ * 只说"已施加"不说"还剩下什么"，那份报告就在冒充完整结论。
+ */
+const RESIDUAL_RISKS = Object.freeze({
+  'metadata.go-buildinfo-inline-overwrite':
+    '记录清零后，模块路径、编译器版本与构建设置仍原样留在只读数据与函数名表里，Go 运行时要读它们，覆写会改变运行行为；对这批字节做字符串检索仍能取出全部构建信息',
+  'metadata.go-buildinfo-pointer-overwrite':
+    '记录清零后，模块路径、编译器版本与构建设置仍原样留在只读数据与函数名表里，Go 运行时要读它们，覆写会改变运行行为；对这批字节做字符串检索仍能取出全部构建信息',
+  'metadata.go-buildinfo-writable-region-overwrite':
+    '记录清零后，模块路径、编译器版本与构建设置仍原样留在只读数据与函数名表里，Go 运行时要读它们，覆写会改变运行行为；对这批字节做字符串检索仍能取出全部构建信息',
+  'metadata.go-buildinfo-macho-rw-overwrite':
+    '记录清零后，模块路径、编译器版本与构建设设仍原样留在只读数据与函数名表里，Go 运行时要读它们，覆写会改变运行行为；对这批字节做字符串检索仍能取出全部构建信息',
+  'metadata.go-buildinfo-pe-characteristics-overwrite':
+    '记录清零后，模块路径、编译器版本与构建设置仍原样留在只读数据与函数名表里，Go 运行时要读它们，覆写会改变运行行为；对这批字节做字符串检索仍能取出全部构建信息',
+  'metadata.rust-dep-section-overwrite':
+    '只覆写节头里的节名与节类型，.dep-v0 的压缩载荷一个字节未动，直接检索仍可取回依赖元数据原文',
+  'metadata.elf-symtab-clear':
+    '清零静态符号表只让按名检索失效，按地址枚举与反汇编照常；动态符号表是运行期必需数据，一律拒改',
+  'metadata.elf-build-id-note-overwrite':
+    '清零构建标识只让按标识匹配调试信息与符号服务器失效；标识本身仍可作为制品指纹，被提前记录后即使清零也能继续比对',
+  'metadata.pe-debug-directory-overwrite':
+    '只覆写符号文件路径字节，调试目录结构与数据目录项未改动，目录条目数与类型仍可读',
+  'metadata.pyc-source-hash-clear':
+    '清零源哈希后按名核对源文件的机制失效，但字节码本身仍可被完整反汇编，函数名与常量照常可提取',
+  'content.data-segment-overwrite':
+    '只覆盖给出的字节区间，区间外一个字节未动，直接检索即可取回',
+  'runtime.probe-integration-package':
+    '只生成检测代码与人工清单，不改动制品；自检代码本身成为新的可分析面，内核级观察不在字节级能力范围内',
+  'model.safetensors-metadata-relayout':
+    '元数据可被再次剥离，重布局不构成技术屏障；张量数据一个字节未动',
+  'model.gguf-metadata-relayout':
+    '元数据可被再次剥离，重布局不构成技术屏障；张量数据一个字节未动',
+  'secret.token-placeholder-overwrite':
+    '只覆盖模式命中的字节，任意自创令牌不在覆盖内；检索为空不证明制品里没有秘密',
+});
+
+/**
+ * 缓解措施编号到源头解法的映射。没有源头解法的一项登记 null：
+ * 数据段区间是调用方自己指定的，反运行时观察集成包本身就是给源码用的集成代码。
+ * 源头解法是构建期动作，比等长覆写彻底——记录整个消失，而不是清零后字符串还在。
+ * 每项都带自身代价，理由与功能风险一致：不说代价的建议等于替用户做了决定。
+ */
+const SOURCE_FIXES = Object.freeze({
+  'metadata.go-buildinfo-inline-overwrite': Object.freeze({
+    action: '用 go build -trimpath -ldflags="-s -w" 重新构建',
+    risk: '去掉符号表后 panic 堆栈不再有函数名与行号；-trimpath 会改变 runtime.Caller 报告的路径，按路径做判断的代码要另行核对',
+  }),
+  'metadata.go-buildinfo-pointer-overwrite': Object.freeze({
+    action: '用 go build -trimpath -ldflags="-s -w" 重新构建',
+    risk: '去掉符号表后 panic 堆栈不再有函数名与行号；-trimpath 会改变 runtime.Caller 报告的路径，按路径做判断的代码要另行核对',
+  }),
+  'metadata.go-buildinfo-writable-region-overwrite': Object.freeze({
+    action: '用 go build -trimpath -ldflags="-s -w" 重新构建',
+    risk: '去掉符号表后 panic 堆栈不再有函数名与行号；-trimpath 会改变 runtime.Caller 报告的路径，按路径做判断的代码要另行核对',
+  }),
+  'metadata.go-buildinfo-macho-rw-overwrite': Object.freeze({
+    action: '用 go build -trimpath -ldflags="-s -w" 重新构建',
+    risk: '去掉符号表后 panic 堆栈不再有函数名与行号；-trimpath 会改变 runtime.Caller 报告的路径，按路径做判断的代码要另行核对',
+  }),
+  'metadata.go-buildinfo-pe-characteristics-overwrite': Object.freeze({
+    action: '用 go build -trimpath -ldflags="-s -w" 重新构建',
+    risk: '去掉符号表后 panic 堆栈不再有函数名与行号；-trimpath 会改变 runtime.Caller 报告的路径，按路径做判断的代码要另行核对',
+  }),
+  'metadata.rust-dep-section-overwrite': Object.freeze({
+    action: '用 strip --remove-section=.dep-v0 删掉整个节，而不是只改节名',
+    risk: '删节改变节表布局，需重跑格式校验；删掉的依赖信息无法从制品自身恢复，需另存构建记录',
+  }),
+  'metadata.elf-symtab-clear': Object.freeze({
+    action: '链接时加 -s（Go 用 -ldflags="-s"），发布前对产物做一次 strip',
+    risk: '去掉符号表后按名检索与堆栈符号化失效，需另存未剥离副本供排查',
+  }),
+  'metadata.elf-build-id-note-overwrite': Object.freeze({
+    action: '链接时加 -Wl,--build-id=none',
+    risk: '去掉构建标识后无法按标识匹配调试信息与符号服务器',
+  }),
+  'metadata.pe-debug-directory-overwrite': Object.freeze({
+    action: '链接时加 /DEBUG:NONE，或发布前用 strip 去掉调试目录',
+    risk: '去掉调试目录后崩溃转储无法自动定位符号，需另存 PDB',
+  }),
+  'metadata.pyc-source-hash-clear': Object.freeze({
+    action: '用 python -m compileall --invalidation-mode timestamp 重新编译',
+    risk: '时间戳模式下解释器按源文件修改时间与大小核对。源文件被替换后不会触发重编译，发布流程里需固定源文件',
+  }),
+  'model.safetensors-metadata-relayout': Object.freeze({
+    action: '在导出模型时就不写入敏感元数据',
+    risk: '需改导出流程；重新导出后要重新走一遍审计',
+  }),
+  'model.gguf-metadata-relayout': Object.freeze({
+    action: '在导出模型时就不写入敏感元数据',
+    risk: '需改导出流程；重新导出后要重新走一遍审计',
+  }),
+  'secret.token-placeholder-overwrite': Object.freeze({
+    action: '把令牌从代码、配置与构建脚本里移除，改由服务端在运行期下发',
+    risk: '需要服务端架构配合；这是唯一绝对有效的一层，其余措施都只提高成本',
+  }),
+});
+
+/**
+ * 取一项缓解措施的残留风险说明。编号不在表内时返回 null，
+ * 与"这一项没有残留风险"区分开：调用方据此决定报不报这句话。
+ * @param {string} mitigationId 措施编号
+ * @returns {string | null}
+ */
+export function residualRiskFor(mitigationId) {
+  return typeof mitigationId === 'string' && Object.hasOwn(RESIDUAL_RISKS, mitigationId) ? RESIDUAL_RISKS[mitigationId] : null;
+}
+
+/**
+ * 取一项缓解措施的源头解法。没有源头解法时返回 null。
+ * @param {string} mitigationId 措施编号
+ * @returns {{action: string, risk: string} | null}
+ */
+export function sourceFixFor(mitigationId) {
+  return typeof mitigationId === 'string' && Object.hasOwn(SOURCE_FIXES, mitigationId) ? SOURCE_FIXES[mitigationId] : null;
+}
+
 /** 缓解措施编号到字节级施加函数的映射。探针集成包没有字节级实现，单独走拒写路径。 */
 const BYTE_TRANSFORMS = Object.freeze({
   'metadata.go-buildinfo-inline-overwrite': (buffer, finding) => overwriteGoBuildinfo(buffer, finding),
@@ -93,6 +213,8 @@ const BYTE_TRANSFORMS = Object.freeze({
  *   containers      适用容器；空数组表示不按容器限定
  *   functionalRisk  对合法用户的功能风险说明
  *   signatureImpact 对签名与校验和的影响
+ *   residualRisk    施加后仍会暴露什么，null 表示没有可声明的残留
+ *   sourceFix       更彻底的构建期做法与它自身的代价，null 表示没有源头解法
  *   applyToBuffer   字节级施加，同步函数，返回 {ok, buffer, ranges, notes, relayout?, zip?} 或 {ok:false, reason}
  *   apply           文件级施加，异步函数，读入、施加、写出，返回施加结果记录
  */
@@ -105,6 +227,8 @@ export const TRANSFORM_REGISTRY = Object.freeze(
       containers: containersOfMitigation(id),
       functionalRisk: functionalRiskOf(id),
       signatureImpact: signatureImpactOf(id),
+      residualRisk: residualRiskFor(id),
+      sourceFix: sourceFixFor(id),
       applyToBuffer: byteTransformOf(id),
       apply: async (input) => {
         // 没有字节级实现的措施在文件级入口上明确抛 NotImplementedError，
@@ -216,6 +340,8 @@ export async function applyMitigations(input) {
         finding: typeof finding?.id === 'string' ? finding.id : null,
         kind: transform.kind,
         layer: transform.layer,
+        residualRisk: transform.residualRisk,
+        sourceFix: transform.sourceFix,
         status: 'skipped',
         changed: false,
         reason: `重布局写入 ${mitigationId} 已在本批次内施加过一次，整体重新序列化只做一次`,
@@ -351,16 +477,22 @@ function budgetExceededResult({ inputPath, outputPath, fileSize, maxFileBytes, f
     container: 'unknown',
     gate: { allowed: false, reason, requiresResign: false, recomputeChecksum: false },
     applied: [],
-    skipped: findings.map((finding) => ({
-      mitigation: typeof finding?.mitigation === 'string' ? finding.mitigation : null,
-      finding: typeof finding?.id === 'string' ? finding.id : null,
-      kind: null,
-      layer: null,
-      status: 'skipped',
-      changed: false,
-      reason,
-      notes: [],
-    })),
+    skipped: findings.map((finding) => {
+      const mitigationId = typeof finding?.mitigation === 'string' ? finding.mitigation : null;
+      const transform = mitigationId === null ? null : transformById(mitigationId);
+      return {
+        mitigation: mitigationId,
+        finding: typeof finding?.id === 'string' ? finding.id : null,
+        kind: transform?.kind ?? null,
+        layer: transform?.layer ?? null,
+        residualRisk: transform?.residualRisk ?? null,
+        sourceFix: transform?.sourceFix ?? null,
+        status: 'skipped',
+        changed: false,
+        reason,
+        notes: [],
+      };
+    }),
     changed: false,
     wrote: false,
     idempotent: false,
@@ -388,6 +520,8 @@ function applyOne(state, finding, policy, metadata) {
     finding: typeof finding?.id === 'string' ? finding.id : null,
     kind: transform?.kind ?? null,
     layer: transform?.layer ?? null,
+    residualRisk: transform?.residualRisk ?? null,
+    sourceFix: transform?.sourceFix ?? null,
     status: 'skipped',
     changed: false,
     reason: null,
@@ -537,10 +671,10 @@ function containersOfMitigation(id) {
     return Object.freeze(['elf', 'mach-o']);
   }
   if (id === 'secret.token-placeholder-overwrite') {
-    // 令牌扫描由全部八类读取器做，覆写在能保持结构完好的容器上施加。
-    // pyc、gguf、beam 三类的令牌都在长度前缀的原始字节里，按命中长度清零不破坏各自结构。
+    // 令牌扫描由全部九类读取器做，覆写在能保持结构完好的容器上施加。
+    // pyc、gguf、beam、dex 四类的令牌都在长度前缀的原始字节里，按命中长度清零不破坏各自结构。
     // safetensors 只报告不覆写：令牌在 JSON 头内，填零会引入原始控制字符，使 JSON 头解析失败。
-    return Object.freeze(['elf', 'pe', 'mach-o', 'mach-o-fat', 'zip', 'pyc', 'gguf', 'beam']);
+    return Object.freeze(['elf', 'pe', 'mach-o', 'mach-o-fat', 'zip', 'pyc', 'gguf', 'beam', 'dex']);
   }
   if (id === 'content.data-segment-overwrite') {
     return Object.freeze(['elf', 'pe', 'mach-o']);
@@ -572,8 +706,7 @@ function functionalRiskOf(id) {
     return '只覆写符号文件路径字节，调试目录结构与数据目录项未改动';
   }
   if (id === 'secret.token-placeholder-overwrite') {
-    return '占位覆写只覆盖模式命中的字节，任意自创令牌不在覆盖内；检索为空不证明制品里没有秘密；safetensors 的令牌在 JSON 头内，填零会使头解析失败，该类只报告不覆写';
-  }
+    return '占位覆写只覆盖模式命中的字节，任意自创令牌不在覆盖内；检索为空不证明制品里没有秘密；safetensors 的令牌在 JSON 头内，填零会使头解析失败，该类只报告不覆写';  }
   if (id === 'content.data-segment-overwrite') {
     return '等长覆写保持文件长度与全部偏移不变，但只覆盖给出的字节区间，区间外仍可被直接检索';
   }

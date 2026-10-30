@@ -69,7 +69,7 @@ export function goBuildinfoMagicOffset(buffer, finding) {
 /**
  * Go 构建信息等长覆写：ELF、Mach-O 与 PE 三类容器共用同一套字节行为。
  * inline 编码覆写魔数、版本串与模块信息载荷；pointer 编码覆写魔数、两个指针变长值及其目标串；
- * 编码未识别时只覆写魔数本身，并把残余风险写进 notes。
+ * 编码未识别时只覆写魔数本身，并把残留风险写进 notes。
  * @param {Buffer} buffer 制品字节（不会被修改）
  * @param {Record<string, unknown>} finding 审计发现
  * @returns {{ok: true, buffer: Buffer, ranges: Array<[number, number]>, notes: string[]} | {ok: false, reason: string}}
@@ -135,7 +135,7 @@ export function overwriteGoBuildinfo(buffer, finding) {
 
 /**
  * Rust 依赖节等长覆写：ELF 覆写节头里的节名偏移与节类型，Mach-O 覆写节内的定长节名字段。
- * 只改节头标识，不动载荷字节：压缩载荷仍可能被裸检索，这一残余风险在 notes 里写明。
+ * 只改节头标识，不动载荷字节：压缩载荷仍可能被裸检索，这一残留风险在 notes 里写明。
  * @param {Buffer} buffer 制品字节
  * @param {Record<string, unknown>} finding 审计发现
  * @param {string} containerType 容器标识

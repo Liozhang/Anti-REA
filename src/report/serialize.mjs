@@ -15,6 +15,14 @@ import { budgetsOf } from '../policy/schema.mjs';
 export const TRUNCATION_MARK = '…[报表已达到策略字节上限，内容已截断]';
 
 /**
+ * 人读文本逐条列出的发现条数上限。
+ * 序列化有字节预算兜底，人读文本没有：一份几千条发现的制品若逐条全印，
+ * 文本会无上限增长，终端与日志都接不住。超出部分只报条数并指向 JSON 输出，
+ * 残缺不冒充完整——这句话本身就是限制说明。
+ */
+export const TEXT_FINDING_LIMIT = 20;
+
+/**
  * 序列化为 JSON 文本。
  * 超限时先去掉最占空间的 findings 与 limitations 明细，只保留汇总；
  * 仍然超限则在 UTF-8 字符边界处硬截断，末尾附截断标记。
@@ -131,6 +139,34 @@ export function renderTextReport(report) {
       }
     }
   }
+  // 逐条发现：按层计数只回答“有多少”，不回答“是哪几条、读了会看到什么”。
+  // 残留风险与源头解法跟发现一起出，用户在审计阶段就看到这项措施做不到什么、
+  // 以及更彻底的做法是什么，而不是等加固结束后才发现记录清零了字符串还在。
+  const findings = Array.isArray(report?.findings) ? report.findings : [];
+  if (findings.length > 0) {
+    lines.push(`逐条发现：${findings.length} 条`);
+    const shown = findings.slice(0, TEXT_FINDING_LIMIT);
+    for (const finding of shown) {
+      lines.push(
+        `  ${finding?.id ?? '（无编号）'} [${finding?.severity ?? '未知'}] ${finding?.title ?? '（无标题）'}（${finding?.category ?? '未知'}）`,
+      );
+      const evidence = finding?.evidence ?? {};
+      const range = Array.isArray(evidence.byteRange) ? `：${evidence.byteRange[0]}-${evidence.byteRange[1]}` : '';
+      lines.push(`    证据：${evidence.path ?? '未知'}${range}`);
+      lines.push(`    读取器 ${finding?.reader ?? '未知'}：${finding?.readerLimitation ?? '未说明'}`);
+      if (typeof finding?.residualRisk === 'string' && finding.residualRisk !== '') {
+        lines.push(`    施加后仍会暴露：${finding.residualRisk}`);
+      }
+      const fix = finding?.sourceFix;
+      if (fix !== null && typeof fix === 'object') {
+        lines.push(`    更彻底的做法：${fix.action}`);
+        lines.push(`    该做法的自身代价：${fix.risk}`);
+      }
+    }
+    if (findings.length > shown.length) {
+      lines.push(`  另有 ${findings.length - shown.length} 条发现未在此列出，完整清单请用 JSON 输出`);
+    }
+  }
   const boundaries = report?.capabilityBoundaries ?? [];
   if (boundaries.length > 0) {
     lines.push(`能力边界：${boundaries.length} 项`);
@@ -153,12 +189,24 @@ export function renderTextReport(report) {
     lines.push(`已施加缓解：${report.applied.length} 项`);
     for (const item of report.applied) {
       lines.push(`  ${item.mitigation}（${item.kind}）`);
+      if (typeof item.residualRisk === 'string' && item.residualRisk !== '') {
+        lines.push(`    施加后仍会暴露：${item.residualRisk}`);
+      }
+      if (item.sourceFix !== null && typeof item.sourceFix === 'object') {
+        lines.push(`    更彻底的做法：${item.sourceFix.action}（该做法的自身代价：${item.sourceFix.risk}）`);
+      }
     }
   }
   if (Array.isArray(report?.skipped)) {
     lines.push(`已跳过缓解：${report.skipped.length} 项`);
     for (const item of report.skipped) {
       lines.push(`  ${item.mitigation ?? '（未标注编号）'}：${item.reason}`);
+      if (typeof item.residualRisk === 'string' && item.residualRisk !== '') {
+        lines.push(`    即使施加也仍会暴露：${item.residualRisk}`);
+      }
+      if (item.sourceFix !== null && typeof item.sourceFix === 'object') {
+        lines.push(`    更彻底的做法：${item.sourceFix.action}（该做法的自身代价：${item.sourceFix.risk}）`);
+      }
     }
   }
   if (report?.outputNote !== undefined) {
