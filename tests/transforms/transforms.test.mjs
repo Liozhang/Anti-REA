@@ -24,7 +24,7 @@ import {
   transformById,
   transformsOfKind,
 } from '../../src/transforms/index.mjs';
-import { parseElfStructure, parsePeStructure } from '../../src/transforms/parse.mjs';
+import { parseElfStructure, parseMachOStructure, parsePeStructure } from '../../src/transforms/parse.mjs';
 import { parseGguf, validateGguf, validateSafetensors } from '../../src/transforms/relayout.mjs';
 import { inspectContainer } from '../../src/verify/facts.mjs';
 import {
@@ -1001,6 +1001,29 @@ test('超出覆写侧扫描窗口的长令牌同样完整覆写，不留残余�
 });
 
 // ---- 写出原子性 ----
+
+test('写入侧结构解析按 64 位胖二进制布局读取分片偏移', async () => {
+  // 写入侧的聚焦解析与读取器必须同一口径：64 位分片项 32 字节，offset 八字节。
+  // 按 32 位布局读会把偏移取成高四字节，对 offset 大于 4 GiB 的分片恒为零。
+  const slice = Buffer.alloc(32);
+  slice.writeUInt32LE(0xfeedfacf, 0); // 64 位小端 Mach-O 魔数
+  const header = Buffer.alloc(40);
+  header.writeUInt32BE(0xcafebabf, 0); // 64 位胖二进制魔数
+  header.writeUInt32BE(1, 4); // nfat_arch
+  header.writeInt32BE(0x0100000c, 8); // cputype
+  header.writeInt32BE(0, 12); // cpusubtype
+  header.writeBigUInt64BE(BigInt(4096), 16); // offset 八字节
+  header.writeBigUInt64BE(BigInt(slice.length), 24); // size 八字节
+  header.writeUInt32BE(12, 32); // align
+  header.writeUInt32BE(0, 36); // reserved
+  const fat64 = Buffer.concat([header, Buffer.alloc(4096 - header.length), slice]);
+
+  const parsed = parseMachOStructure(fat64);
+  assert.equal(parsed.ok, true, parsed.reason);
+  assert.equal(parsed.data.slices.length, 1);
+  assert.equal(parsed.data.slices[0].base, 4096, '分片必须定位到 offset 字段声明的 4096，而不是高四字节读出的 0');
+  assert.equal(parsed.data.slices[0].bits, 64);
+});
 
 test('写出中途失败不留下损坏副本，也不留下临时文件', async () => {
   const { path, findings } = await fixture('atomic-fail.elf', buildElfGoInline().buffer);

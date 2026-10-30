@@ -203,6 +203,38 @@ test('首个分片落在识别窗口之外时，按真实文件长度仍判胖�
   assert.equal(detectContainer(window).type, 'unsupported', '不给文件长度时只能按窗口推断，会误判');
 });
 
+test('CAFEBABF 判为 64 位胖二进制，分片项按 32 字节布局读取', () => {
+  // 64 位胖二进制：魔数 CAFEBABF，分片项 32 字节，offset 与 size 各八字节。
+  // 修复前识别层没有这个魔数条目，一律判为未判定，一类真实存在的格式完全不可用。
+  const fatBytes = fixtureBytes('mach-o/fat.macho');
+  const slice = fatBytes.subarray(4096);
+  const header = Buffer.alloc(40);
+  header.writeUInt32BE(0xcafebabf, 0);
+  header.writeUInt32BE(1, 4); // nfat_arch
+  header.writeInt32BE(0x0100000c, 8); // cputype
+  header.writeInt32BE(0, 12);
+  header.writeBigUInt64BE(BigInt(4096), 16); // offset 八字节
+  header.writeBigUInt64BE(BigInt(slice.length), 24); // size 八字节
+  header.writeUInt32BE(12, 32); // align
+  header.writeUInt32BE(0, 36); // reserved
+  const fat64 = Buffer.concat([header, Buffer.alloc(4096 - header.length), slice]);
+
+  const result = detectContainer(fat64, fat64.length);
+  assert.equal(result.type, 'mach-o-fat');
+  assert.match(result.note ?? '', /CAFEBABF/);
+
+  // 判据边界与 32 位相同：首个分片越出文件尾时不是胖二进制。
+  const outOfRange = Buffer.from(fat64);
+  outOfRange.writeBigUInt64BE(BigInt(fat64.length), 16);
+  assert.equal(detectContainer(outOfRange, outOfRange.length).type, 'unsupported', '首个分片越出文件尾不算胖二进制');
+
+  // 读不到完整分片项（64 位需要 40 字节）：判为未判定，不冒充范围外容器。
+  const shortWindow = fat64.subarray(0, 20);
+  const truncated = detectContainer(shortWindow, fat64.length);
+  assert.equal(truncated.type, 'unknown');
+  assert.equal(truncated.label, '未判定');
+});
+
 test('复审对 Java 类文件不再失败：范围外条目不进入结构复审', async () => {
   const path = fixturePath('unsupported/java-class.class');
   const result = await runCli(['verify', path, '--json']);

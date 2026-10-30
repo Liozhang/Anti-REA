@@ -16,13 +16,15 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { auditArtifact } from '../src/audit/engine.mjs';
+import { SUPPORTED_CONTAINERS } from '../src/container/detect.mjs';
 import { UsageError } from '../src/errors.mjs';
 import { createMcpServer } from '../src/mcp/server.mjs';
 import { REQUIRED_SETS } from '../src/required-sets/sets.mjs';
 import { analyzePe, computePeChecksum } from '../src/signatures/index.mjs';
-import { CHECK_FAMILIES, CHECK_STATUSES, VERIFY_REPORT_SCHEMA, verifyArtifact } from '../src/verify/index.mjs';
+import { CHECK_FAMILIES, CHECK_STATUSES, FAMILIES_BY_CONTAINER, VERIFY_REPORT_SCHEMA, verifyArtifact } from '../src/verify/index.mjs';
 import { inspectContainer } from '../src/verify/facts.mjs';
 import { buildFixtures } from './required-sets/build-fixtures.mjs';
+import { buildGguf } from './transforms/fixture-bytes.mjs';
 import { runCli } from './helpers/cli.mjs';
 
 /** 确定性字节级夹具表。 */
@@ -89,12 +91,12 @@ function assertClosedVocabulary(report) {
 }
 
 /**
- * 构造一个最小胖 Mach-O：一个 64 位小端分片，含 LC_SEGMENT_64 与带真实载荷的
- * LC_CODE_SIGNATURE，签名载荷相对分片起点存放，整份文件自洽。
+ * 构造胖 Mach-O 里的单个分片：64 位小端，含 LC_SEGMENT_64 与带真实载荷的
+ * LC_CODE_SIGNATURE，签名载荷相对分片起点存放。
+ * @param {Buffer} signature 签名载荷
  * @returns {Buffer}
  */
-function buildFatMacho() {
-  const signature = Buffer.from('fat slice code signature payload', 'latin1');
+function buildFatSlice(signature) {
   const segment = Buffer.alloc(72);
   segment.writeUInt32LE(0x19, 0); // LC_SEGMENT_64
   segment.writeUInt32LE(72, 4);
@@ -110,7 +112,15 @@ function buildFatMacho() {
   sliceHeader.writeUInt32LE(2, 12); // MH_EXECUTE
   sliceHeader.writeUInt32LE(2, 16); // ncmds
   sliceHeader.writeUInt32LE(88, 20); // sizeofcmds
-  const slice = Buffer.concat([sliceHeader, segment, codeSignature, signature]);
+  return Buffer.concat([sliceHeader, segment, codeSignature, signature]);
+}
+
+/**
+ * 构造一个最小胖 Mach-O：一个 64 位小端分片，整份文件自洽。
+ * @returns {Buffer}
+ */
+function buildFatMacho() {
+  const slice = buildFatSlice(Buffer.from('fat slice code signature payload', 'latin1'));
 
   const fatHeader = Buffer.alloc(8);
   fatHeader.writeUInt32BE(0xcafebabe, 0); // FAT_MAGIC 大端存放
@@ -121,6 +131,31 @@ function buildFatMacho() {
   fatArch.writeUInt32BE(4096, 8); // offset
   fatArch.writeUInt32BE(slice.length, 12); // size
   fatArch.writeUInt32BE(12, 16); // align
+  const header = Buffer.concat([fatHeader, fatArch]);
+  const gap = Buffer.alloc(4096 - header.length);
+  return Buffer.concat([header, gap, slice]);
+}
+
+/**
+ * 构造一个最小 64 位胖 Mach-O：魔数 CAFEBABF，分片项按 fat_arch_64 布局
+ * （offset 与 size 各八字节，共三十二字节），分片内容与 32 位版相同。
+ * 修复前识别层不认 CAFEBABF、解析层按 32 位布局读 offset（取到高四字节恒为零），
+ * 一类真实存在的格式完全不可用，且失败原因被报成“魔数不对”。
+ * @returns {Buffer}
+ */
+function buildFatMacho64() {
+  const slice = buildFatSlice(Buffer.from('fat64 slice code signature payload', 'latin1'));
+
+  const fatHeader = Buffer.alloc(8);
+  fatHeader.writeUInt32BE(0xcafebabf, 0); // 64 位 FAT_MAGIC 大端存放
+  fatHeader.writeUInt32BE(1, 4); // nfat_arch
+  const fatArch = Buffer.alloc(32);
+  fatArch.writeInt32BE(0x0100000c, 0);
+  fatArch.writeInt32BE(0, 4);
+  fatArch.writeBigUInt64BE(BigInt(4096), 8); // offset 八字节
+  fatArch.writeBigUInt64BE(BigInt(slice.length), 16); // size 八字节
+  fatArch.writeUInt32BE(12, 24); // align
+  fatArch.writeUInt32BE(0, 28); // reserved
   const header = Buffer.concat([fatHeader, fatArch]);
   const gap = Buffer.alloc(4096 - header.length);
   return Buffer.concat([header, gap, slice]);
@@ -187,6 +222,7 @@ test('九类格式与胖二进制的完好夹具复审通过，退出码为 0', 
       ['safetensors', FIXTURES.safetensors],
       ['pyc', FIXTURES.pyc],
       ['beam', FIXTURES.beam],
+      ['dex', FIXTURES.dex],
     ];
     for (const [name, bytes] of cases) {
       const path = await writeArtifact(dir, `${name}.bin`, bytes);
@@ -208,6 +244,32 @@ test('九类格式与胖二进制的完好夹具复审通过，退出码为 0', 
   }
 });
 
+test('64 位胖 Mach-O 复审通过，分片表按 64 位布局解析', async () => {
+  // 修复前：识别层不认 CAFEBABF，判为未判定；即使送到读取器，分片项也按 32 位
+  // 布局解析，offset 取到高四字节恒为零，分片被送到文件头，报“魔数不对”。
+  const dir = await makeDir();
+  try {
+    const path = await writeArtifact(dir, 'fat64.bin', buildFatMacho64());
+    const before = await digestOf(path);
+
+    const audit = await auditArtifact(path, {});
+    assert.ok(
+      audit.containers.some((container) => container.type === 'mach-o-fat'),
+      `64 位胖二进制应识别为 mach-o-fat：${JSON.stringify(audit.containers)}`,
+    );
+
+    const { exitCode, report } = await verifyArtifact(path);
+    assert.equal(exitCode, 0, `64 位胖二进制应通过复审：${JSON.stringify(report.checks)}`);
+    assert.equal(report.status, 'passed');
+    assert.equal(report.summary.failed, 0);
+    assert.ok(report.summary.checks > 0, '64 位胖二进制至少要跑容器解析与必需集两个检查族');
+    assertClosedVocabulary(report);
+    assert.equal(await digestOf(path), before, '复审不得改动制品字节');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('必需集每一项都在完好夹具上拿到事实，没有静默的未判定项', async () => {
   const cases = [
     ['elf', FIXTURES.elf],
@@ -219,6 +281,7 @@ test('必需集每一项都在完好夹具上拿到事实，没有静默的未�
     ['safetensors', FIXTURES.safetensors],
     ['pyc', FIXTURES.pyc],
     ['beam', FIXTURES.beam],
+    ['dex', FIXTURES.dex],
   ];
   for (const [container, bytes] of cases) {
     const inspection = inspectContainer(container, bytes);
@@ -286,6 +349,25 @@ test('畸形 GGUF：元数据表或张量索引截断记失败原因，不抛异
   const truncatedTensor = Buffer.concat([Buffer.from('GGUF', 'latin1'), u32le(3), u64le(1), u64le(1), oneEntry]);
   const tensorInspection = inspectContainer('gguf', truncatedTensor);
   assert.equal(tensorInspection.facts['gguf.tensor-index'].parsed, false);
+});
+
+test('GGUF 张量数据区按类型取元素字节数：F64 不少算，I8 不多算', () => {
+  // 修复前这里硬编码“类型 0 算 4 字节、其余一律 2 字节”，与读取器和写入侧的表都不一致：
+  // F64 两个元素需要 16 字节只给 8 字节时，需求被算成 4 字节，漏报越界；
+  // I8 八个元素只需 8 字节，需求被算成 16 字节，误报数据区不足。
+  const f64Short = buildGguf({ tensors: [{ name: 'w', shape: [2], type: 28, data: Buffer.alloc(8, 0x5a) }] });
+  assert.equal(
+    inspectContainer('gguf', f64Short).facts['gguf.tensor-data'].parsed,
+    false,
+    'F64 两个元素需要 16 字节，只给 8 字节必须判越界',
+  );
+
+  const i8Exact = buildGguf({ tensors: [{ name: 'w', shape: [8], type: 24, data: Buffer.alloc(8, 0x5a) }] });
+  assert.equal(
+    inspectContainer('gguf', i8Exact).facts['gguf.tensor-data'].parsed,
+    true,
+    'I8 八个元素只需 8 字节，数据区足够必须判通过',
+  );
 });
 
 test('目录目标逐条目复审，范围外条目记入限制说明而不是静默跳过', async () => {
@@ -741,6 +823,49 @@ test('目录目标受预算约束时逐个条目记 pending，不因个别条目
     const entries = new Set(report.checks.filter((check) => check.status === 'pending').map((check) => check.entry));
     assert.deepEqual([...entries].sort(), ['app.elf', 'data.zip']);
     assertClosedVocabulary(report);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('每个受支持容器都登记了检查族，漏登记会让读取失败的路径崩溃', async () => {
+  // 防回归：容器到检查族的映射漏登记某一类容器时，读取失败或预算截断的路径会拿到
+  // undefined 再遍历它，抛类型错误让整个复审崩溃。映射完整性在这里直接断言。
+  for (const container of SUPPORTED_CONTAINERS) {
+    assert.ok(Object.hasOwn(FAMILIES_BY_CONTAINER, container), `容器 ${container} 没有登记检查族`);
+    assert.ok(FAMILIES_BY_CONTAINER[container].length > 0, `容器 ${container} 的检查族不得为空`);
+  }
+  // 反向：映射里不得出现词表外容器。
+  for (const container of Object.keys(FAMILIES_BY_CONTAINER)) {
+    assert.ok(SUPPORTED_CONTAINERS.includes(container), `检查族映射里出现词表外容器 ${container}`);
+  }
+});
+
+test('魔数在文件头的容器在预算截断时逐族记 pending，不因漏登记检查族而崩溃', async () => {
+  // 行为路径：这些容器的魔数在偏移 0，16 字节预算下仍能识别，于是走到逐族记 pending
+  // 的分支——dex 曾经就崩在这里。胖二进制、PE 与 safetensors 的识别本身需要更长的
+  // 文件头（分片项、e_lfanew、JSON 头长度），16 字节下判为范围外，走不到这条路径，
+  // 由上面的映射完整性测试守住。
+  const dir = await makeDir();
+  try {
+    const cases = [
+      ['elf', FIXTURES.elf],
+      ['mach-o', FIXTURES['mach-o']],
+      ['zip', FIXTURES.zip],
+      ['gguf', FIXTURES.gguf],
+      ['pyc', FIXTURES.pyc],
+      ['beam', FIXTURES.beam],
+      ['dex', FIXTURES.dex],
+    ];
+    for (const [name, bytes] of cases) {
+      const path = await writeArtifact(dir, `${name}.bin`, bytes);
+      const { exitCode, report } = await verifyArtifact(path, { policy: { budgets: { maxFileBytes: 16 } } });
+      assert.equal(report.summary.failed, 0, `${name} 部分读取不是制品损坏的证据，不得记失败`);
+      assert.ok(report.summary.pending > 0, `${name} 应逐族记 pending`);
+      const codes = report.limitations.map((limitation) => limitation.code);
+      assert.ok(codes.includes('verify-read-truncated'), `${name} 应附截断限制说明`);
+      assertClosedVocabulary(report);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
