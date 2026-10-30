@@ -8,6 +8,7 @@
 
 import { inspectLegalFields } from '../notice/index.mjs';
 import { readUIntLE } from '../readers/common.mjs';
+import { GGUF_TENSOR_TYPES } from '../readers/gguf.mjs';
 
 /** safetensors 长度前缀字节数。 */
 const SAFETENSORS_PREFIX_BYTES = 8;
@@ -15,8 +16,6 @@ const SAFETENSORS_PREFIX_BYTES = 8;
 const GGUF_MAGIC = Buffer.from('GGUF', 'latin1');
 /** GGUF 元数据值类型编号。 */
 const GGUF_VALUE_TYPES = Object.freeze({ 0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 8: null, 9: null, 10: 8, 11: 8, 12: 8 });
-/** GGUF 张量数据类型编号到元素字节数；量化类型的块结构不在 v1 范围内。 */
-const GGUF_TENSOR_TYPES = Object.freeze({ 0: 4, 1: 2, 24: 1, 25: 2, 26: 4, 27: 8, 28: 8, 29: 2 });
 /** GGUF 默认对齐值，文件未声明 general.alignment 时使用。 */
 const GGUF_DEFAULT_ALIGNMENT = 32;
 /** 法律字段缺失时不得写入任何元数据：内容不真实即构成伪造。 */
@@ -425,7 +424,9 @@ export function parseGguf(buffer) {
     if (typeId === undefined || dataOffset === undefined) {
       return { ok: false, reason: `张量 ${name.value} 的类型或偏移读取失败` };
     }
-    const elementSize = GGUF_TENSOR_TYPES[typeId] ?? null;
+    // 元素字节数取自读取器登记的同一张表：量化类型（size 为 null）与未登记类型
+    // 都不猜字节数，按无法推算处理。
+    const elementSize = GGUF_TENSOR_TYPES[typeId]?.size ?? null;
     tensors.push({
       name: name.value,
       shape,

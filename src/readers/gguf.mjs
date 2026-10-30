@@ -26,8 +26,11 @@ const VALUE_TYPES = Object.freeze({
   12: { name: 'f64', size: 8 },
 });
 
-/** 张量数据类型编号到元素字节数。量化类型的块结构不在 v1 范围内，只登记名称。 */
-const TENSOR_TYPES = Object.freeze({
+/**
+ * 张量数据类型编号到类型名与元素字节数。量化类型的块结构不在 v1 范围内，只登记名称。
+ * 复审与写入侧都从这里取，避免三处各写一份 approximations 互相漂移。
+ */
+export const GGUF_TENSOR_TYPES = Object.freeze({
   0: { name: 'F32', size: 4 },
   1: { name: 'F16', size: 2 },
   6: { name: 'Q5_0', size: null },
@@ -221,11 +224,11 @@ async function readGguf(context) {
       break;
     }
     const elementCount = shape.reduce((total, size) => total * size, 1);
-    const elementSize = TENSOR_TYPES[typeId]?.size ?? null;
+    const elementSize = GGUF_TENSOR_TYPES[typeId]?.size ?? null;
     tensors.push({
       name: name.value,
       shape,
-      type: TENSOR_TYPES[typeId]?.name ?? String(typeId),
+      type: GGUF_TENSOR_TYPES[typeId]?.name ?? String(typeId),
       elementSize,
       dataOffset,
       byteLength: elementSize === null ? null : elementCount * elementSize,

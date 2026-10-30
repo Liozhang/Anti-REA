@@ -14,6 +14,7 @@
 import { inflateRawSync } from 'node:zlib';
 
 import { crc32 } from '../signatures/crc32.mjs';
+import { GGUF_TENSOR_TYPES } from '../readers/gguf.mjs';
 
 /** marshal 类型码集合，用于判断 pyc 载荷是否存在且形状合理。 */
 const MARSHAL_TYPE_CODES = new Set([0x28, 0x30, 0x3e, 0x5b, 0x7a, 0x63, 0x69, 0x73, 0x4e, 0x54, 0x46, 0x4c]);
@@ -570,23 +571,29 @@ function inspectMachoFat(bytes) {
   if (bytes.length < 8) {
     return envelope('mach-o-fat', { parseable: false, reason: '胖二进制头越界', structures }, facts);
   }
-  // 胖二进制头按大端存储；以小端读出为 0xbebafeca。
+  // 胖二进制头按大端存储；以小端读出为 0xbebafeca。64 位魔数 CAFEBABF 读出为
+  // 0xbfbafeca，分片项布局随位数区分：offset 与 size 各八字节。
   const fatMagic = bytes.readUInt32LE(0);
-  if (fatMagic !== 0xbebafeca && fatMagic !== 0xcafebabe) {
+  const is64 = fatMagic === 0xbfbafeca;
+  if (fatMagic !== 0xbebafeca && !is64 && fatMagic !== 0xcafebabe) {
     return envelope('mach-o-fat', { parseable: false, reason: '魔数不是 Mach-O 胖二进制', structures }, facts);
   }
   facts['mach-o-fat.fat-header'] = ok('胖二进制头魔数与 nfat_arch 可读');
   structures.push('胖二进制头');
   const nfat = bytes.readUInt32BE(4);
+  const archBytes = is64 ? 32 : 20;
   const slices = [];
   let archTableOk = nfat > 0;
   for (let index = 0; index < nfat; index += 1) {
-    const base = 8 + index * 20;
-    if (base + 20 > bytes.length) {
+    const base = 8 + index * archBytes;
+    if (base + archBytes > bytes.length) {
       archTableOk = false;
       break;
     }
-    slices.push({ offset: bytes.readUInt32BE(base + 8), size: bytes.readUInt32BE(base + 12) });
+    slices.push({
+      offset: is64 ? Number(bytes.readBigUInt64BE(base + 8)) : bytes.readUInt32BE(base + 8),
+      size: is64 ? Number(bytes.readBigUInt64BE(base + 16)) : bytes.readUInt32BE(base + 12),
+    });
   }
   facts['mach-o-fat.arch-table'] = archTableOk ? ok(`分片表共 ${nfat} 条，全部可读`) : broken(`分片表第 ${nfat} 条越界或条目数为 0`);
   if (!archTableOk) {
@@ -913,8 +920,15 @@ function inspectGguf(bytes) {
       indexOk = false;
       break;
     }
-    const bytesPerElement = tensorType === 0 ? 4 : 2;
-    maxEnd = Math.max(maxEnd, offset + elements * bytesPerElement);
+    // 元素字节数取自读取器登记的同一张表。曾经这里硬编码“类型 0 算 4 字节、其余一律
+    // 2 字节”：F64 的需求被算成一半（漏报越界），I8 被算成两倍（误报数据区不足）。
+    // 未登记类型与量化类型都不猜字节数，按索引越界处理。
+    const tensorSpec = GGUF_TENSOR_TYPES[tensorType];
+    if (tensorSpec === undefined || tensorSpec.size === null) {
+      indexOk = false;
+      break;
+    }
+    maxEnd = Math.max(maxEnd, offset + elements * tensorSpec.size);
   }
   facts['gguf.tensor-index'] = indexOk ? ok(`张量索引共 ${tensorCount} 条`) : broken('张量索引越界');
   const dataStart = Math.ceil(position / alignment) * alignment;

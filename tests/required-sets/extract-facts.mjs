@@ -6,6 +6,7 @@
 
 import { inflateRawSync } from 'node:zlib';
 
+import { GGUF_TENSOR_TYPES } from '../../src/readers/gguf.mjs';
 import { crc32 } from './build-fixtures.mjs';
 
 /** marshal 类型码集合，用于判断 pyc 载荷是否存在且形状合理。 */
@@ -449,8 +450,14 @@ function extractGgufFacts(buffer) {
     position += 4;
     const offset = Number(buffer.readBigUInt64LE(position));
     position += 8;
-    const bytesPerElement = tensorType === 0 ? 4 : 2;
-    maxEnd = Math.max(maxEnd, offset + elements * bytesPerElement);
+    // 与 src/verify/facts.mjs 同一口径：元素字节数取自读取器登记的表，
+    // 未登记类型与量化类型不猜字节数，按越界处理。
+    const tensorSpec = GGUF_TENSOR_TYPES[tensorType];
+    if (tensorSpec === undefined || tensorSpec.size === null) {
+      indexParseable = false;
+      break;
+    }
+    maxEnd = Math.max(maxEnd, offset + elements * tensorSpec.size);
   }
   facts['gguf.tensor-index'] = { parsed: indexParseable, reason: `张量索引共 ${tensorCount} 条` };
   const dataStart = Math.ceil(position / 32) * 32;
