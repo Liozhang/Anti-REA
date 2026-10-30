@@ -47,6 +47,13 @@ const NESTED_DEX_ENTRY_LIMIT = 8;
 /** 单个 ZIP 内递归解析 DEX 的累计字节上限，防止解压后总体积失控。 */
 const NESTED_DEX_BYTES_LIMIT = 32 * 1024 * 1024;
 
+/**
+ * deflate 条目解压输出的默认上限：策略未给出 budgets.maxFileBytes 时使用。
+ * 与策略默认单文件上限取同一量级，解压与读取同样受资源预算约束；
+ * 声明的未压缩大小不可信，这个上限同时是解压调用本身的硬防线。
+ */
+const DEFAULT_INFLATE_CAP_BYTES = 64 * 1024 * 1024;
+
 /** CRC32 查找表，多项式 0xEDB88320 的反射形式。 */
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -302,55 +309,75 @@ async function readZip(context) {
       }
     } else if (zipEntry.method === 8) {
       // deflate 条目：解压后扫描，并用解压结果核对 CRC32。
-      let inflated = null;
-      try {
-        inflated = inflateRawSync(local.raw);
-      } catch {
-        inflated = null;
-      }
-      if (inflated === null) {
+      // 解压输出受预算约束：中央目录声明的未压缩大小不可信（畸形归档可以撒谎），
+      // 因此先用它做事前预检，再给解压调用本身设 maxOutputLength 作为硬防线。
+      // 超预算的条目不解压，只按原始压缩字节扫描，覆盖缺口在限制说明里声明。
+      const inflateCap = Number.isFinite(budgets.maxFileBytes)
+        ? Math.max(0, Math.floor(budgets.maxFileBytes))
+        : DEFAULT_INFLATE_CAP_BYTES;
+      if (zipEntry.uncompressedSize > inflateCap) {
         report.coverage = 'raw-bytes-only';
-        report.reason = 'node:zlib 无法解压该 deflate 条目，只按原始压缩字节扫描，覆盖缺口在此声明';
+        report.reason = `条目声明解压后 ${zipEntry.uncompressedSize} 字节，超出解压预算 ${inflateCap} 字节，未解压`;
         rawOnlyCount += 1;
         limitations.push(
           limitation(
-            'zip-entry-inflate-failed',
-            `条目 ${zipEntry.name} 用 node:zlib 解压失败，只按原始压缩字节扫描；压缩内容里的可提取事实本次没有覆盖，不等于不存在`,
+            'zip-entry-inflate-over-budget',
+            `条目 ${zipEntry.name} 声明的未压缩大小为 ${zipEntry.uncompressedSize} 字节，超出本次解压预算 ${inflateCap} 字节，未解压，只按原始压缩字节扫描；压缩内容里的可提取事实本次没有覆盖，不等于不存在`,
           ),
         );
         const scan = scanTokens(local.raw);
         findings.push(...tokenFindings(scan, { path, reader: 'zip', baseOffset: local.localHeader.dataStart, source: 'deflate-entry-compressed-bytes' }));
       } else {
-        const crc = crc32Of(inflated);
-        report.coverage = 'decompressed-scanned';
-        report.crc32Computed = crc;
-        report.crcMatch = crc === zipEntry.crc32;
-        report.nestedContainer = nestedContainerOf(inflated);
-        if (report.nestedContainer === 'dex') {
-          dexCandidates.push({ name: zipEntry.name, content: inflated, compressed: true });
+        let inflated = null;
+        try {
+          inflated = inflateRawSync(local.raw, { maxOutputLength: inflateCap });
+        } catch {
+          inflated = null;
         }
-        scannedEntryCount += 1;
-        if (!report.crcMatch) {
+        if (inflated === null) {
+          report.coverage = 'raw-bytes-only';
+          report.reason = 'node:zlib 无法解压该 deflate 条目，或解压输出超出预算，只按原始压缩字节扫描，覆盖缺口在此声明';
+          rawOnlyCount += 1;
           limitations.push(
             limitation(
-              'zip-entry-crc-mismatch',
-              `条目 ${zipEntry.name} 解压后 CRC32 为 0x${crc.toString(16)}，与中央目录记录的 0x${zipEntry.crc32.toString(16)} 不一致；条目内容可能已被改动`,
+              'zip-entry-inflate-failed',
+              `条目 ${zipEntry.name} 用 node:zlib 解压失败，或解压输出超出预算 ${inflateCap} 字节，只按原始压缩字节扫描；压缩内容里的可提取事实本次没有覆盖，不等于不存在`,
             ),
           );
-        }
-        if (inflated.length !== zipEntry.uncompressedSize) {
-          limitations.push(
-            limitation(
-              'zip-entry-size-mismatch',
-              `条目 ${zipEntry.name} 解压后 ${inflated.length} 字节，与中央目录记录的未压缩大小 ${zipEntry.uncompressedSize} 不一致`,
-            ),
-          );
-        }
-        const scan = scanTokens(inflated);
-        findings.push(...tokenFindings(scan, { path, reader: 'zip', source: 'deflate-entry-decompressed-bytes' }));
-        const scanLimitation = tokenScanLimitation(scan, `条目 ${zipEntry.name} 的解压内容`);
-        if (scanLimitation !== null) {
-          limitations.push(scanLimitation);
+          const scan = scanTokens(local.raw);
+          findings.push(...tokenFindings(scan, { path, reader: 'zip', baseOffset: local.localHeader.dataStart, source: 'deflate-entry-compressed-bytes' }));
+        } else {
+          const crc = crc32Of(inflated);
+          report.coverage = 'decompressed-scanned';
+          report.crc32Computed = crc;
+          report.crcMatch = crc === zipEntry.crc32;
+          report.nestedContainer = nestedContainerOf(inflated);
+          if (report.nestedContainer === 'dex') {
+            dexCandidates.push({ name: zipEntry.name, content: inflated, compressed: true });
+          }
+          scannedEntryCount += 1;
+          if (!report.crcMatch) {
+            limitations.push(
+              limitation(
+                'zip-entry-crc-mismatch',
+                `条目 ${zipEntry.name} 解压后 CRC32 为 0x${crc.toString(16)}，与中央目录记录的 0x${zipEntry.crc32.toString(16)} 不一致；条目内容可能已被改动`,
+              ),
+            );
+          }
+          if (inflated.length !== zipEntry.uncompressedSize) {
+            limitations.push(
+              limitation(
+                'zip-entry-size-mismatch',
+                `条目 ${zipEntry.name} 解压后 ${inflated.length} 字节，与中央目录记录的未压缩大小 ${zipEntry.uncompressedSize} 不一致`,
+              ),
+            );
+          }
+          const scan = scanTokens(inflated);
+          findings.push(...tokenFindings(scan, { path, reader: 'zip', source: 'deflate-entry-decompressed-bytes' }));
+          const scanLimitation = tokenScanLimitation(scan, `条目 ${zipEntry.name} 的解压内容`);
+          if (scanLimitation !== null) {
+            limitations.push(scanLimitation);
+          }
         }
       }
     } else {
